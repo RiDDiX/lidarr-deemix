@@ -1,8 +1,8 @@
-FROM python:alpine
+FROM python:3.12-alpine
 
 WORKDIR /app
 
-# Installiere notwendige Pakete und Build-Tools
+# Installiere grundlegende Build-Tools und Bibliotheken
 RUN apk add --no-cache \
     nodejs \
     npm \
@@ -17,21 +17,21 @@ RUN apk add --no-cache \
     musl-dev \
     libffi-dev
 
-# Kopiere requirements.txt in den Container
+# Kopiere die requirements.txt in den Container
 COPY python/requirements.txt ./python/requirements.txt
 
-# Installiere Python-Abhängigkeiten
+# Upgrade pip und installiere Python-Abhängigkeiten ohne Cache
 RUN python -m pip install --upgrade pip && \
     python -m pip install --no-cache-dir -r python/requirements.txt
 
 # Installiere pnpm global
 RUN npm i -g pnpm
 
-# Kopiere Node-abhängige Dateien und installiere diese
+# Kopiere package.json und pnpm-lock.yaml und installiere Node-Abhängigkeiten
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm i
 
-# Kopiere den restlichen Code in den Container
+# Kopiere den restlichen Quellcode in den Container
 COPY . .
 
 EXPOSE 8080
