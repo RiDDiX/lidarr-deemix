@@ -8,17 +8,14 @@ export async function getLidarrArtist(name: string): Promise<any | null> {
     if (!res.ok) {
       throw new Error(`HTTP error: ${res.status}`);
     }
-    const json = (await res.json()) as any[];
+    const json: any[] = await res.json();
     const a = json.find(
       (a) =>
         a["album"] === null &&
         a["artist"] &&
         normalize(a["artist"]["artistname"]) === normalize(name)
     );
-    if (typeof a !== "undefined") {
-      return a["artist"];
-    }
-    return null;
+    return a ? a["artist"] : null;
   } catch (error) {
     console.error("Error fetching Lidarr artist:", error);
     return null;
@@ -32,13 +29,11 @@ export async function getAllLidarrArtists(): Promise<any[]> {
     if (!url || !apiKey) {
       throw new Error("LIDARR_URL or LIDARR_API_KEY not defined");
     }
-    const res = await fetch(url, {
-      headers: { "X-Api-Key": apiKey },
-    });
+    const res = await fetch(url, { headers: { "X-Api-Key": apiKey } });
     if (!res.ok) {
       throw new Error(`HTTP error: ${res.status}`);
     }
-    const json = (await res.json()) as any[];
+    const json: any[] = await res.json();
     return json;
   } catch (error) {
     console.error("Error fetching all Lidarr artists:", error);

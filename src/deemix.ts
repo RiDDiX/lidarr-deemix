@@ -4,37 +4,35 @@ import { getAllLidarrArtists } from "./lidarr.js";
 import { titleCase, normalize } from "./helpers.js";
 import { link } from "fs";
 
-// Optional: Ein Interface für Alben, das Du erweitern kannst
-export interface Album {
+/**
+ * Interface für die gemappten Albumdaten.
+ */
+export interface MappedAlbum {
+  Id: string;
+  OldIds: any[];
+  ReleaseStatuses: string[];
+  SecondaryTypes: string[];
   Title: string;
-  [key: string]: any;
+  LowerTitle: string;
+  Type: string;
+  // Weitere Felder können hier ergänzt werden, falls nötig.
 }
 
 /**
  * Erzeugt eine Fake-ID, die anhand des Typs einen Buchstaben-Prefix verwendet.
  */
 function fakeId(id: string | number, type: string): string {
-  // artist
   let p = "a";
-  if (type === "album") {
-    p = "b";
-  }
-  if (type === "track") {
-    p = "c";
-  }
-  if (type === "release") {
-    p = "d";
-  }
-  if (type === "recording") {
-    p = "e";
-  }
+  if (type === "album") p = "b";
+  if (type === "track") p = "c";
+  if (type === "release") p = "d";
+  if (type === "recording") p = "e";
   const idStr = `${id}`.padStart(12, p);
   return `${"".padStart(8, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${idStr}`;
 }
 
 /**
- * Einfacher Fuzzy-Vergleich: Zunächst wird normalisiert und anschließend geprüft,
- * ob einer der normalisierten Titel den anderen als Substring enthält.
+ * Einfacher Fuzzy-Vergleich: Normalisiert zwei Titel und prüft, ob einer den anderen als Substring enthält.
  */
 function isSimilar(title1: string, title2: string): boolean {
   const n1 = normalize(title1);
@@ -44,10 +42,10 @@ function isSimilar(title1: string, title2: string): boolean {
 }
 
 /**
- * Entfernt Duplikate aus einer Albumliste anhand eines Vergleichs der Titel.
+ * Entfernt Duplikate aus einer Liste von Alben anhand des Titels.
  */
-function deduplicateAlbums(albums: Album[]): Album[] {
-  const deduped: Album[] = [];
+function deduplicateAlbums(albums: MappedAlbum[]): MappedAlbum[] {
+  const deduped: MappedAlbum[] = [];
   for (const album of albums) {
     if (!deduped.some((a) => isSimilar(a.Title, album.Title))) {
       deduped.push(album);
@@ -56,26 +54,27 @@ function deduplicateAlbums(albums: Album[]): Album[] {
   return deduped;
 }
 
-export async function deemixArtists(name: string): Promise<any[]> {
+async function deemixArtists(name: string): Promise<any[]> {
   const data = await fetch(`${deemixUrl}/search/artists?limit=100&offset=0&q=${name}`);
-  const j = await data.json();
+  const j: any = await data.json();
   return j["data"] as any[];
 }
 
 export async function deemixAlbum(id: string): Promise<any> {
   const data = await fetch(`${deemixUrl}/albums/${id}`);
-  return await data.json();
+  const j: any = await data.json();
+  return j;
 }
 
 export async function deemixTracks(id: string): Promise<any> {
   const data = await fetch(`${deemixUrl}/album/${id}/tracks`);
-  const j = await data.json();
+  const j: any = await data.json();
   return j.data as any[];
 }
 
 export async function deemixArtist(id: string): Promise<any> {
   const data = await fetch(`${deemixUrl}/artists/${id}`);
-  const j = await data.json();
+  const j: any = await data.json();
   return {
     Albums: j["albums"]["data"].map((a: any) => ({
       Id: fakeId(a["id"], "album"),
@@ -106,17 +105,17 @@ export async function deemixArtist(id: string): Promise<any> {
   };
 }
 
-export async function deemixAlbums(name: string): Promise<any[]> {
+async function deemixAlbums(name: string): Promise<any[]> {
   let total = 0;
   let start = 0;
   const data = await fetch(`${deemixUrl}/search/albums?limit=1&offset=0&q=${name}`);
-  const j = await data.json();
+  const j: any = await data.json();
   total = j["total"] as number;
 
   const albums: any[] = [];
   while (start < total) {
     const data = await fetch(`${deemixUrl}/search/albums?limit=100&offset=${start}&q=${name}`);
-    const j = await data.json();
+    const j: any = await data.json();
     albums.push(...(j["data"] as any[]));
     start += 100;
   }
@@ -153,10 +152,8 @@ export async function getAlbum(id: string): Promise<any> {
   }));
 
   const lidarrArtists = await getAllLidarrArtists();
-
   let lidarr: any = null;
   let deemix: any = null;
-
   for (const la of lidarrArtists) {
     for (const c of contributors) {
       if (
@@ -168,9 +165,7 @@ export async function getAlbum(id: string): Promise<any> {
       }
     }
   }
-
   let lidarr2: any = {};
-
   if (process.env.OVERRIDE_MB === "true") {
     lidarr = deemix;
     lidarr2 = {
@@ -203,7 +198,6 @@ export async function getAlbum(id: string): Promise<any> {
       type: "Artist",
     };
   }
-
   const tracks = await deemixTracks(d["id"]);
   return {
     aliases: [],
@@ -255,28 +249,21 @@ export async function getAlbum(id: string): Promise<any> {
 }
 
 /**
- * Holt Alben von Deemix, mappt sie und entfernt Duplikate
- * mithilfe eines kombinierten Vergleichs (exakt & fuzzy).
+ * Holt Alben von Deemix, mappt sie und entfernt Duplikate mithilfe eines kombinierten Vergleichs (exakt & fuzzy).
  */
-export async function getAlbums(name: string): Promise<any[]> {
+export async function getAlbums(name: string): Promise<MappedAlbum[]> {
   const dalbums = await deemixAlbums(name);
-
-  let dtoRalbums = dalbums.map((d: any) => ({
+  let dtoRalbums: MappedAlbum[] = dalbums.map((d: any) => ({
     Id: `${fakeId(d["id"], "album")}`,
     OldIds: [],
     ReleaseStatuses: ["Official"],
     SecondaryTypes: d["title"].toLowerCase().includes("live") ? ["Live"] : [],
     Title: titleCase(d["title"]),
-    // LowerTitle wird zur initialen Sortierung genutzt
     LowerTitle: normalize(d["title"]),
     Type: getType(d["record_type"]),
   }));
-
-  // Zuerst mit lodash uniqBy nach exakter Normalisierung filtern
   dtoRalbums = _.uniqBy(dtoRalbums, "LowerTitle");
-  // Anschließend mit einem eigenen Fuzzy-Deduplikationsverfahren weiter filtern
   dtoRalbums = deduplicateAlbums(dtoRalbums);
-
   return dtoRalbums;
 }
 
@@ -286,7 +273,6 @@ export async function getAlbums(name: string): Promise<any[]> {
  */
 export async function search(lidarr: any, query: string, isManual: boolean = true): Promise<any> {
   const dartists = await deemixArtists(query);
-
   let lartist: any;
   let lidx = -1;
   let didx = -1;
@@ -327,14 +313,11 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
       }
       lartist["artist"]["oldids"].push(fakeId(dartist["id"], "artist"));
     }
-
     lidarr[lidx] = lartist;
   }
-
   if (didx > -1) {
     dartists.splice(didx, 1);
   }
-
   let dtolartists: any[] = dartists.map((d: any) => ({
     artist: {
       artistaliases: [],
@@ -357,7 +340,6 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
       type: (d["type"] as string).charAt(0).toUpperCase() + (d["type"] as string).slice(1),
     },
   }));
-
   if (lidarr.length === 0) {
     const sorted: any[] = [];
     for (const a of dtolartists) {
@@ -372,7 +354,6 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
     }
     dtolartists = sorted;
   }
-
   if (!isManual) {
     dtolartists = dtolartists.map((a) => a.artist);
     if (process.env.OVERRIDE_MB === "true") {
@@ -386,21 +367,16 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
       ];
     }
   }
-
   lidarr = [...lidarr, ...dtolartists];
-
   if (process.env.OVERRIDE_MB === "true") {
     lidarr = dtolartists;
   }
-
   return lidarr;
 }
 
 async function getAritstByName(name: string): Promise<any> {
   const artists = await deemixArtists(name);
-  const artist = artists.find(
-    (a: any) => a["name"] === name || normalize(a["name"]) === normalize(name)
-  );
+  const artist = artists.find((a: any) => a["name"] === name || normalize(a["name"]) === normalize(name));
   return artist;
 }
 
@@ -423,9 +399,7 @@ export async function getArtist(lidarr: any): Promise<any> {
       Url: artist["picture_xl"],
     });
   }
-
   const albums = await getAlbums(lidarr["artistname"]);
-
   let existing = lidarr["Albums"].map((a: any) => normalize(a["Title"]));
   if (process.env.PRIO_DEEMIX === "true") {
     existing = albums.map((a: any) => normalize(a["Title"]));
@@ -451,6 +425,5 @@ export async function getArtist(lidarr: any): Promise<any> {
       ];
     }
   }
-
   return lidarr;
 }

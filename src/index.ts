@@ -18,9 +18,7 @@ const lidarrApiUrl = "https://api.lidarr.audio";
 const scrobblerApiUrl = "https://ws.audioscrobbler.com";
 
 const fastify = Fastify({
-  logger: {
-    level: "error",
-  },
+  logger: { level: "error" },
 });
 
 async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
@@ -50,12 +48,11 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
     console.error(e);
   }
   res.statusCode = status;
-  // Hier verwenden wir die Headers API; falls nötig, casten wir sie zu any.
-  res.headers = data?.headers as any;
-  let json = await data?.json();
-
+  res.headers = (data?.headers as any) || {};
+  const json: any = await data?.json();
   if (process.env.OVERRIDE_MB === "true") {
-    json = removeKeys(json, "mbid");
+    // Entfernt alle "mbid"-Felder
+    return { newres: res, data: removeKeys(json, "mbid") };
   }
   return { newres: res, data: json };
 }
@@ -124,11 +121,10 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     }
   }
 
-  // Entferne Content-Encoding aus den Headers (Cast, falls nötig)
   data?.headers.delete("content-encoding");
   console.log(status, method, url);
   res.statusCode = status;
-  res.headers = data?.headers as any;
+  res.headers = (data?.headers as any) || {};
   return { newres: res, data: lidarr };
 }
 
