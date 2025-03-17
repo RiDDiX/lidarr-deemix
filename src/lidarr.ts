@@ -2,27 +2,57 @@ import { normalize } from "./helpers.js";
 
 const lidarrApiUrl = "https://api.lidarr.audio";
 
-export async function getLidarArtist(name: string) {
-  const res = await fetch(
-    `${lidarrApiUrl}/api/v0.4/search?type=all&query=${name}`
-  );
-  const json = (await res.json()) as [];
-  const a = json.find(
-    (a) =>
-      a["album"] === null &&
-      typeof a["artist"] !== "undefined" &&
-      normalize(a["artist"]["artistname"]) === normalize(name)
-  );
-  if (typeof a !== "undefined") {
-    return a["artist"];
+/**
+ * Sucht einen einzelnen Künstler in Lidarr anhand des Namens.
+ * Dabei wird geprüft, ob der zurückgegebene Datensatz
+ * kein Album (album === null) enthält und der normalisierte Künstlername exakt passt.
+ */
+export async function getLidarrArtist(name: string) {
+  try {
+    const res = await fetch(
+      `${lidarrApiUrl}/api/v0.4/search?type=all&query=${encodeURIComponent(name)}`
+    );
+    if (!res.ok) {
+      throw new Error(`HTTP error: ${res.status}`);
+    }
+    const json = (await res.json()) as any[];
+    const a = json.find(
+      (a) =>
+        a["album"] === null &&
+        a["artist"] &&
+        normalize(a["artist"]["artistname"]) === normalize(name)
+    );
+    if (typeof a !== "undefined") {
+      return a["artist"];
+    }
+    return null;
+  } catch (error) {
+    console.error("Error fetching Lidarr artist:", error);
+    return null;
   }
-  return null;
 }
 
+/**
+ * Holt alle Künstler aus der Lidarr-Instanz.
+ * Die URL und der API-Key werden aus den Umgebungsvariablen gelesen.
+ */
 export async function getAllLidarrArtists() {
-  const res = await fetch(`${process.env.LIDARR_URL}/api/v1/artist`, {
-    headers: { "X-Api-Key": process.env.LIDARR_API_KEY as string },
-  });
-  const json = (await res.json()) as [];
-  return json;
+  try {
+    const url = `${process.env.LIDARR_URL}/api/v1/artist`;
+    const apiKey = process.env.LIDARR_API_KEY as string;
+    if (!url || !apiKey) {
+      throw new Error("LIDARR_URL or LIDARR_API_KEY not defined");
+    }
+    const res = await fetch(url, {
+      headers: { "X-Api-Key": apiKey },
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP error: ${res.status}`);
+    }
+    const json = (await res.json()) as any[];
+    return json;
+  } catch (error) {
+    console.error("Error fetching all Lidarr artists:", error);
+    return [];
+  }
 }

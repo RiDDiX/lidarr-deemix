@@ -1,39 +1,41 @@
 import latinize from "latinize";
+
+/**
+ * Wandelt einen String in Title Case um.
+ */
 export function titleCase(str: string) {
-  var splitStr = str.toLowerCase().split(" ");
-  for (var i = 0; i < splitStr.length; i++) {
-    // You do not need to check if i is larger than splitStr length, as your for does that for you
-    // Assign it back to the array
+  const splitStr = str.toLowerCase().split(" ");
+  for (let i = 0; i < splitStr.length; i++) {
     splitStr[i] =
       splitStr[i].charAt(0).toUpperCase() + splitStr[i].substring(1);
   }
-  // Directly return the joined string
   return splitStr.join(" ");
 }
 
+/**
+ * Normalisiert einen String:
+ * - Wandelt in Kleinbuchstaben um
+ * - Wandelt Akzente in ASCII um (latinize)
+ * - Entfernt alle nicht-alphanumerischen Zeichen (außer Leerzeichen)
+ * - Bereinigt überflüssigen Whitespace
+ */
 export function normalize(str: string) {
-  return latinize(str.toLowerCase());
+  return latinize(str.toLowerCase())
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
+/**
+ * Entfernt aus einem Objekt alle Keys, die in keys angegeben sind.
+ */
 export function removeKeys(obj: any, keys: any) {
-  var index;
-  for (var prop in obj) {
+  for (const prop in obj) {
     if (obj.hasOwnProperty(prop)) {
-      switch (typeof obj[prop]) {
-        case "string":
-          index = keys.indexOf(prop);
-          if (index > -1) {
-            delete obj[prop];
-          }
-          break;
-        case "object":
-          index = keys.indexOf(prop);
-          if (index > -1) {
-            delete obj[prop];
-          } else {
-            removeKeys(obj[prop], keys);
-          }
-          break;
+      if (keys.indexOf(prop) > -1) {
+        delete obj[prop];
+      } else if (typeof obj[prop] === "object") {
+        removeKeys(obj[prop], keys);
       }
     }
   }

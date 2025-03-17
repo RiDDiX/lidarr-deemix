@@ -4,6 +4,9 @@ import { getAllLidarrArtists } from "./lidarr.js";
 import { titleCase, normalize } from "./helpers.js";
 import { link } from "fs";
 
+/**
+ * Erzeugt eine Fake-ID, die anhand des Typs einen Buchstaben-Prefix verwendet.
+ */
 function fakeId(id: any, type: string) {
   // artist
   let p = "a";
@@ -27,6 +30,30 @@ function fakeId(id: any, type: string) {
     4,
     p
   )}-${"".padStart(4, p)}-${id}`;
+}
+
+/**
+ * Einfacher Fuzzy-Vergleich: Zunächst wird normalisiert und anschließend geprüft,
+ * ob einer der normalisierten Titel den anderen als Substring enthält.
+ */
+function isSimilar(title1, title2) {
+  const n1 = normalize(title1);
+  const n2 = normalize(title2);
+  if (n1 === n2) return true;
+  return n1.includes(n2) || n2.includes(n1);
+}
+
+/**
+ * Entfernt Duplikate aus einer Albumliste anhand eines Vergleichs der Titel.
+ */
+function deduplicateAlbums(albums) {
+  const deduped = [];
+  for (const album of albums) {
+    if (!deduped.some((a) => isSimilar(a.Title, album.Title))) {
+      deduped.push(album);
+    }
+  }
+  return deduped;
 }
 
 async function deemixArtists(name: string): Promise<[]> {
@@ -69,7 +96,6 @@ export async function deemixArtist(id: string): Promise<any> {
     artistaliases: [],
     artistname: j["name"],
     disambiguation: "",
-
     genres: [],
     id: `${fakeId(j["id"], "artist")}`,
     images: [{ CoverType: "Poster", Url: j["picture_xl"] }],
@@ -117,7 +143,6 @@ async function deemixAlbums(name: string): Promise<any[]> {
 
 function getType(rc: string) {
   let type = rc.charAt(0).toUpperCase() + rc.slice(1);
-
   if (type === "Ep") {
     type = "EP";
   }
@@ -174,7 +199,7 @@ export async function getAlbum(id: string) {
       oldids: [],
       sortname: lidarr["artistname"].split(" ").reverse().join(", "),
       status: "active",
-      type: "Arist",
+      type: "Artist",
     };
   } else {
     lidarr2 = {
@@ -189,7 +214,7 @@ export async function getAlbum(id: string) {
       oldids: [],
       sortname: lidarr!["artistName"].split(" ").reverse().join(", "),
       status: "active",
-      type: "Arist",
+      type: "Artist",
     };
   }
 
@@ -213,7 +238,6 @@ export async function getAlbum(id: string) {
         disambiguation: "",
         id: `${fakeId(d["id"], "release")}`,
         label: [d["label"]],
-
         media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
           Format: "CD",
           Name: "",
@@ -244,6 +268,10 @@ export async function getAlbum(id: string) {
   };
 }
 
+/**
+ * Holt Alben von Deemix, mappt sie und entfernt Duplikate
+ * mithilfe eines kombinierten Vergleichs (exakt & fuzzy).
+ */
 export async function getAlbums(name: string) {
   const dalbums = await deemixAlbums(name);
 
@@ -253,15 +281,23 @@ export async function getAlbums(name: string) {
     ReleaseStatuses: ["Official"],
     SecondaryTypes: d["title"].toLowerCase().includes("live") ? ["Live"] : [],
     Title: titleCase(d["title"]),
-    LowerTitle: d["title"].toLowerCase(),
+    // LowerTitle wird zur initialen Sortierung genutzt
+    LowerTitle: normalize(d["title"]),
     Type: getType(d["record_type"]),
   }));
 
+  // Zuerst mit lodash uniqBy nach exakter Normalisierung filtern
   dtoRalbums = _.uniqBy(dtoRalbums, "LowerTitle");
+  // Anschließend mit einem eigenen Fuzzy-Deduplikationsverfahren weiter filtern
+  dtoRalbums = deduplicateAlbums(dtoRalbums);
 
   return dtoRalbums;
 }
 
+/**
+ * Fügt beim Search die Deemix-Ergebnisse zu den Lidarr-Ergebnissen zusammen,
+ * wobei vorhandene Künstler anhand des normalisierten Namens abgeglichen werden.
+ */
 export async function search(
   lidarr: any,
   query: string,
@@ -405,7 +441,7 @@ export async function getArtist(lidarr: any) {
   if (!posterFound) {
     (lidarr["images"] as any[]).push({
       CoverType: "Poster",
-      Url: artist!["picture_xl"],
+      Url: artist["picture_xl"],
     });
   }
 
@@ -419,7 +455,7 @@ export async function getArtist(lidarr: any) {
     lidarr["images"] = [
       {
         CoverType: "Poster",
-        Url: artist!["picture_xl"],
+        Url: artist["picture_xl"],
       },
     ];
     lidarr["Albums"] = albums;
@@ -441,5 +477,3 @@ export async function getArtist(lidarr: any) {
 
   return lidarr;
 }
-
-//
