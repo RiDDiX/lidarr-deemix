@@ -9,3 +9,5 @@ services:
       - DEEMIX_ARL=xxxx
       - OVERRIDE_MB=false # set to true to override MusicBrainz completely !!! CAUTION !!! will delete all artists/albums imported from MB
       - PRIO_DEEMIX=false # set to true to prioritize Deemix albums over Lidarr (adds dupliactes on existing albums, needs cleanup and rescan)
+      - FALLBACK_DEEZER=true # set to true to use Deemix / Deezer as Fallback when Lidarr (MusicBrainz) cant find artists / albums
+      

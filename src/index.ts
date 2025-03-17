@@ -11,6 +11,7 @@ import {
   deemixTracks,
 } from "./deemix.js";
 import { removeKeys } from "./helpers.js";
+import { getArtistData } from "./artistData.js";
 
 dotenv.config();
 
@@ -18,7 +19,9 @@ const lidarrApiUrl = "https://api.lidarr.audio";
 const scrobblerApiUrl = "https://ws.audioscrobbler.com";
 
 const fastify = Fastify({
-  logger: { level: "error" },
+  logger: {
+    level: "error",
+  },
 });
 
 async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
@@ -27,20 +30,18 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
   const method = req.method;
   const body = req.body ? req.body.toString() : "";
   let status = 200;
-
   const nh: { [key: string]: any } = {};
   Object.entries(headers).forEach(([key, value]) => {
     if (key !== "host" && key !== "connection") {
       nh[key] = value;
     }
   });
-
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
     data = await fetch(`${scrobblerApiUrl}${url}`, {
-      method: method,
-      body: body,
+      method,
+      body,
       headers: nh,
     });
     status = data.status;
@@ -48,11 +49,10 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
     console.error(e);
   }
   res.statusCode = status;
-  res.headers = (data?.headers as any) || {};
-  const json: any = await data?.json();
+  res.headers = data?.headers as any;
+  let json = await data?.json();
   if (process.env.OVERRIDE_MB === "true") {
-    // Entfernt alle "mbid"-Felder
-    return { newres: res, data: removeKeys(json, "mbid") };
+    json = removeKeys(json, ["mbid"]);
   }
   return { newres: res, data: json };
 }
@@ -63,39 +63,34 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
   const method = req.method;
   const body = req.body ? req.body.toString() : "";
   let status = 200;
-
   const nh: { [key: string]: any } = {};
   Object.entries(headers).forEach(([key, value]) => {
     if (key !== "host" && key !== "connection") {
       nh[key] = value;
     }
   });
-
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
     data = await fetch(`${lidarrApiUrl}${url}`, {
-      method: method,
-      body: body,
+      method,
+      body,
       headers: nh,
     });
     status = data.status;
   } catch (e) {
     console.error(e);
   }
-
   let lidarr: any;
   try {
     lidarr = await data?.json();
   } catch (e) {
     console.error(e);
   }
-
   if (url.includes("/v0.4/search")) {
     const queryParam = u.searchParams.get("query") || "";
     lidarr = await search(lidarr, queryParam, url.includes("type=all"));
   }
-
   if (url.includes("/v0.4/artist/")) {
     if (url.includes("-aaaa-")) {
       let id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
@@ -104,7 +99,9 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
         status = lidarr === null ? 404 : 200;
       }
     } else {
-      lidarr = await getArtist(lidarr);
+      // Hier kannst Du alternativ getArtistData nutzen, um Fallback zu ermöglichen:
+      const queryParam = u.searchParams.get("query") || "";
+      lidarr = await getArtistData(queryParam);
       if (process.env.OVERRIDE_MB === "true") {
         status = 404;
         lidarr = {};
@@ -120,11 +117,10 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
       }
     }
   }
-
   data?.headers.delete("content-encoding");
   console.log(status, method, url);
   res.statusCode = status;
-  res.headers = (data?.headers as any) || {};
+  res.headers = data?.headers as any;
   return { newres: res, data: lidarr };
 }
 

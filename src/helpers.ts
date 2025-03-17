@@ -13,10 +13,10 @@ export function titleCase(str: string): string {
 
 /**
  * Normalisiert einen String:
- * - Wandelt in Kleinbuchstaben um
- * - Wandelt Akzente in ASCII um (latinize)
- * - Entfernt alle nicht-alphanumerischen Zeichen (außer Leerzeichen)
- * - Bereinigt überflüssigen Whitespace
+ * - Kleinbuchstaben
+ * - Akzente werden in ASCII umgewandelt (latinize)
+ * - Alle nicht-alphanumerischen Zeichen (außer Leerzeichen) werden entfernt
+ * - Überflüssiger Whitespace wird bereinigt
  */
 export function normalize(str: string): string {
   return latinize(str.toLowerCase())
@@ -28,12 +28,12 @@ export function normalize(str: string): string {
 /**
  * Entfernt aus einem Objekt alle Keys, die in keys angegeben sind.
  */
-export function removeKeys(obj: any, keys: any): any {
+export function removeKeys(obj: any, keys: string[]): any {
   for (const prop in obj) {
-    if (obj.hasOwnProperty(prop)) {
+    if (Object.prototype.hasOwnProperty.call(obj, prop)) {
       if (keys.indexOf(prop) > -1) {
         delete obj[prop];
-      } else if (typeof obj[prop] === "object") {
+      } else if (typeof obj[prop] === "object" && obj[prop] !== null) {
         removeKeys(obj[prop], keys);
       }
     }
