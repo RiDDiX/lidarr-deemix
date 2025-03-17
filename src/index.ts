@@ -19,9 +19,7 @@ const lidarrApiUrl = "https://api.lidarr.audio";
 const scrobblerApiUrl = "https://ws.audioscrobbler.com";
 
 const fastify = Fastify({
-  logger: {
-    level: "error",
-  },
+  logger: { level: "error" },
 });
 
 async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
@@ -32,18 +30,12 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
   let status = 200;
   const nh: { [key: string]: any } = {};
   Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") {
-      nh[key] = value;
-    }
+    if (key !== "host" && key !== "connection") nh[key] = value;
   });
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
-    data = await fetch(`${scrobblerApiUrl}${url}`, {
-      method,
-      body,
-      headers: nh,
-    });
+    data = await fetch(`${scrobblerApiUrl}${url}`, { method, body, headers: nh });
     status = data.status;
   } catch (e) {
     console.error(e);
@@ -65,18 +57,12 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
   let status = 200;
   const nh: { [key: string]: any } = {};
   Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") {
-      nh[key] = value;
-    }
+    if (key !== "host" && key !== "connection") nh[key] = value;
   });
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
-    data = await fetch(`${lidarrApiUrl}${url}`, {
-      method,
-      body,
-      headers: nh,
-    });
+    data = await fetch(`${lidarrApiUrl}${url}`, { method, body, headers: nh });
     status = data.status;
   } catch (e) {
     console.error(e);
@@ -99,7 +85,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
         status = lidarr === null ? 404 : 200;
       }
     } else {
-      // Nutze getArtistData, um primär MB/Lidarr und als Fallback Deezer zu verwenden
+      // Hier wird getArtistData als Fallback genutzt
       const queryParam = u.searchParams.get("query") || "";
       lidarr = await getArtistData(queryParam);
       if (process.env.OVERRIDE_MB === "true") {

@@ -4,12 +4,12 @@ import { getAllLidarrArtists } from "./lidarr.js";
 import { titleCase, normalize } from "./helpers.js";
 import { link } from "fs";
 
-/** 
- * Interface für ein Album – alle von getAlbums benötigten Felder
+/**
+ * Interface für ein dedupliziertes Album
  */
-export interface Album {
+export interface AlbumDTO {
   Id: string;
-  OldIds: any[];
+  OldIds: string[];
   ReleaseStatuses: string[];
   SecondaryTypes: string[];
   Title: string;
@@ -42,8 +42,8 @@ function isSimilar(title1: string, title2: string): boolean {
 /**
  * Entfernt Duplikate aus einer Albumliste anhand des Titels.
  */
-function deduplicateAlbums(albums: Album[]): Album[] {
-  const deduped: Album[] = [];
+function deduplicateAlbums(albums: AlbumDTO[]): AlbumDTO[] {
+  const deduped: AlbumDTO[] = [];
   for (const album of albums) {
     if (!deduped.some((a) => isSimilar(a.Title, album.Title))) {
       deduped.push(album);
@@ -55,6 +55,7 @@ function deduplicateAlbums(albums: Album[]): Album[] {
 export async function deemixArtists(name: string): Promise<any[]> {
   const res = await fetch(`${deemixUrl}/search/artists?limit=100&offset=0&q=${name}`);
   const jsonRaw: unknown = await res.json();
+  // Falls jsonRaw kein Objekt ist, gib ein leeres Array zurück
   if (!jsonRaw || typeof jsonRaw !== "object") return [];
   const j = jsonRaw as any;
   return j["data"] as any[];
@@ -105,9 +106,13 @@ export async function deemixArtist(id: string): Promise<any> {
   };
 }
 
-/**
- * Importiere alle Alben zu einem Künstler aus Deemix.
- */
+// Exportiere getAritstByName (Hinweis: Name kann auch getArtistByName heißen)
+export async function getAritstByName(name: string): Promise<any> {
+  const artists = await deemixArtists(name);
+  const artist = artists.find((a: any) => a["name"] === name || normalize(a["name"]) === normalize(name));
+  return artist;
+}
+
 export async function deemixAlbums(name: string): Promise<any[]> {
   let total = 0;
   let start = 0;
@@ -132,7 +137,9 @@ export async function deemixAlbums(name: string): Promise<any[]> {
 
 function getType(rc: string): string {
   let type = rc.charAt(0).toUpperCase() + rc.slice(1);
-  if (type === "Ep") type = "EP";
+  if (type === "Ep") {
+    type = "EP";
+  }
   return type;
 }
 
@@ -250,12 +257,11 @@ export async function getAlbum(id: string): Promise<any> {
 }
 
 /**
- * Holt Alben von Deemix, mappt sie und entfernt Duplikate
- * mithilfe eines kombinierten Vergleichs (exakt & fuzzy).
+ * Holt Alben von Deemix, mappt sie in ein AlbumDTO-Array und entfernt Duplikate.
  */
-export async function getAlbums(name: string): Promise<Album[]> {
+export async function getAlbums(name: string): Promise<AlbumDTO[]> {
   const dalbums = await deemixAlbums(name);
-  let dtoRalbums: Album[] = dalbums.map((d: any) => ({
+  let dtoRalbums: AlbumDTO[] = dalbums.map((d: any) => ({
     Id: `${fakeId(d["id"], "album")}`,
     OldIds: [],
     ReleaseStatuses: ["Official"],
@@ -374,16 +380,6 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
     lidarr = dtolartists;
   }
   return lidarr;
-}
-
-/**
- * Sucht einen Künstler anhand des Namens.
- * Beachte: getAritstByName wird nun exportiert, damit es in anderen Modulen verwendet werden kann.
- */
-export async function getAritstByName(name: string): Promise<any> {
-  const artists = await deemixArtists(name);
-  const artist = artists.find((a: any) => a["name"] === name || normalize(a["name"]) === normalize(name));
-  return artist;
 }
 
 export async function getArtist(lidarr: any): Promise<any> {
