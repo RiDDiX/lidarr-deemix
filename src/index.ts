@@ -99,7 +99,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
         status = lidarr === null ? 404 : 200;
       }
     } else {
-      // Hier kannst Du alternativ getArtistData nutzen, um Fallback zu ermöglichen:
+      // Nutze getArtistData, um primär MB/Lidarr und als Fallback Deezer zu verwenden
       const queryParam = u.searchParams.get("query") || "";
       lidarr = await getArtistData(queryParam);
       if (process.env.OVERRIDE_MB === "true") {
