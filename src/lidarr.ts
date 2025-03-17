@@ -2,16 +2,9 @@ import { normalize } from "./helpers.js";
 
 const lidarrApiUrl = "https://api.lidarr.audio";
 
-/**
- * Sucht einen einzelnen Künstler in Lidarr anhand des Namens.
- * Dabei wird geprüft, ob der zurückgegebene Datensatz
- * kein Album (album === null) enthält und der normalisierte Künstlername exakt passt.
- */
-export async function getLidarrArtist(name: string) {
+export async function getLidarrArtist(name: string): Promise<any | null> {
   try {
-    const res = await fetch(
-      `${lidarrApiUrl}/api/v0.4/search?type=all&query=${encodeURIComponent(name)}`
-    );
+    const res = await fetch(`${lidarrApiUrl}/api/v0.4/search?type=all&query=${encodeURIComponent(name)}`);
     if (!res.ok) {
       throw new Error(`HTTP error: ${res.status}`);
     }
@@ -32,11 +25,7 @@ export async function getLidarrArtist(name: string) {
   }
 }
 
-/**
- * Holt alle Künstler aus der Lidarr-Instanz.
- * Die URL und der API-Key werden aus den Umgebungsvariablen gelesen.
- */
-export async function getAllLidarrArtists() {
+export async function getAllLidarrArtists(): Promise<any[]> {
   try {
     const url = `${process.env.LIDARR_URL}/api/v1/artist`;
     const apiKey = process.env.LIDARR_API_KEY as string;

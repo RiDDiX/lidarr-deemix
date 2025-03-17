@@ -1,5 +1,5 @@
 import fetch from "node-fetch";
-import Fastify from "fastify";
+import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import _ from "lodash";
 import dotenv from "dotenv";
 import {
@@ -12,10 +12,10 @@ import {
 } from "./deemix.js";
 import { removeKeys } from "./helpers.js";
 
+dotenv.config();
+
 const lidarrApiUrl = "https://api.lidarr.audio";
 const scrobblerApiUrl = "https://ws.audioscrobbler.com";
-
-dotenv.config();
 
 const fastify = Fastify({
   logger: {
@@ -23,19 +23,14 @@ const fastify = Fastify({
   },
 });
 
-/**
- * Leitet Anfragen an den Scrobbler weiter und entfernt ggf. unerwünschte Felder,
- * wenn OVERRIDE_MB gesetzt ist.
- */
-async function doScrobbler(req, res) {
+async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
-  const body = req.body?.toString();
+  const body = req.body ? req.body.toString() : "";
   let status = 200;
 
-  // Filtere Header (entferne "host" und "connection")
-  const nh = {};
+  const nh: { [key: string]: any } = {};
   Object.entries(headers).forEach(([key, value]) => {
     if (key !== "host" && key !== "connection") {
       nh[key] = value;
@@ -55,31 +50,24 @@ async function doScrobbler(req, res) {
     console.error(e);
   }
   res.statusCode = status;
-  res.headers = data.headers;
-  let json = await data.json();
+  // Hier verwenden wir die Headers API; falls nötig, casten wir sie zu any.
+  res.headers = data?.headers as any;
+  let json = await data?.json();
 
-  // Entferne Felder, z. B. mbid, falls wir MusicBrainz-Overrides nutzen wollen
   if (process.env.OVERRIDE_MB === "true") {
     json = removeKeys(json, "mbid");
   }
-
   return { newres: res, data: json };
 }
 
-/**
- * Leitet Anfragen an die Lidarr-API weiter und ergänzt diese ggf. mit Deemix-Informationen.
- * – Sucht bei /v0.4/search nach Duplikaten (die deduplizierende Logik ist in search() implementiert).
- * – Bei /v0.4/artist/ und /v0.4/album/ werden die entsprechenden Deemix-Funktionen aufgerufen.
- */
-async function doApi(req, res) {
+async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
-  const body = req.body?.toString();
+  const body = req.body ? req.body.toString() : "";
   let status = 200;
 
-  // Erstelle ein neues Header-Objekt ohne "host" und "connection"
-  const nh = {};
+  const nh: { [key: string]: any } = {};
   Object.entries(headers).forEach(([key, value]) => {
     if (key !== "host" && key !== "connection") {
       nh[key] = value;
@@ -99,68 +87,59 @@ async function doApi(req, res) {
     console.error(e);
   }
 
-  let lidarr;
+  let lidarr: any;
   try {
-    lidarr = await data.json();
+    lidarr = await data?.json();
   } catch (e) {
     console.error(e);
   }
 
-  // Bei Suchanfragen wird unser deduplizierter Such-Workflow genutzt.
   if (url.includes("/v0.4/search")) {
-    // u.searchParams.get("query") liefert den Suchbegriff, "type=all" entscheidet ggf. über den manuellen Import
-    lidarr = await search(
-      lidarr,
-      u.searchParams.get("query"),
-      url.includes("type=all")
-    );
+    const queryParam = u.searchParams.get("query") || "";
+    lidarr = await search(lidarr, queryParam, url.includes("type=all"));
   }
 
-  // Künstlerabfrage: Falls der URL-Pfad den Deemix-Künstler anfordert
   if (url.includes("/v0.4/artist/")) {
     if (url.includes("-aaaa-")) {
-      // Bei speziellen IDs (mit -aaaa-) holen wir direkt den Deemix-Künstler
       let id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
-      lidarr = await deemixArtist(id);
-      status = lidarr === null ? 404 : 200;
+      if (id) {
+        lidarr = await deemixArtist(id);
+        status = lidarr === null ? 404 : 200;
+      }
     } else {
-      // Ansonsten ergänzen wir den Lidarr-Datensatz mit Deemix-Daten (und Duplikatsprüfung)
       lidarr = await getArtist(lidarr);
       if (process.env.OVERRIDE_MB === "true") {
-        // Falls wir MusicBrainz überschreiben, geben wir keinen weiteren Abruf
         status = 404;
         lidarr = {};
       }
     }
   }
-
-  // Albumabfrage: Bei speziellen Album-IDs (mit -bbbb-) holen wir den Deemix-Albumdatensatz
   if (url.includes("/v0.4/album/")) {
     if (url.includes("-bbbb-")) {
       let id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
-      lidarr = await getAlbum(id);
-      status = lidarr === null ? 404 : 200;
+      if (id) {
+        lidarr = await getAlbum(id);
+        status = lidarr === null ? 404 : 200;
+      }
     }
   }
 
-  // Entferne den Content-Encoding-Header (damit keine Probleme mit der Weitergabe entstehen)
-  data.headers.delete("content-encoding");
+  // Entferne Content-Encoding aus den Headers (Cast, falls nötig)
+  data?.headers.delete("content-encoding");
   console.log(status, method, url);
   res.statusCode = status;
-  res.headers = data.headers;
+  res.headers = data?.headers as any;
   return { newres: res, data: lidarr };
 }
 
-fastify.get("*", async (req, res) => {
+fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
   const headers = req.headers;
   const host = headers["x-proxy-host"];
   if (host === "ws.audioscrobbler.com") {
     const { newres, data } = await doScrobbler(req, res);
-    res = newres;
     return data;
   }
   const { newres, data } = await doApi(req, res);
-  res = newres;
   return data;
 });
 
