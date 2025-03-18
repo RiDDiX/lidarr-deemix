@@ -1,4 +1,6 @@
-# Due to lack of time, this project is not maintained anymore. Feel free to fork!
+Its a Fork. Added Deemix as a Fallback (if nothing is found), also a check for albums that there shouldnt be anything doubled or even more clones. 
+
+Just a little work within my short spare time.
 
 <div align="center">
 <img src="./images/logo.webp" height="200" /><br />
