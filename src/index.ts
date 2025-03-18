@@ -18,7 +18,9 @@ dotenv.config();
 const lidarrApiUrl = "https://api.lidarr.audio";
 const scrobblerApiUrl = "https://ws.audioscrobbler.com";
 
-const fastify = Fastify({ logger: { level: "error" } });
+const fastify = Fastify({
+  logger: { level: "error" },
+});
 
 async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
@@ -83,6 +85,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
         status = lidarr === null ? 404 : 200;
       }
     } else {
+      // Hier wird getArtistData als Fallback genutzt
       const queryParam = u.searchParams.get("query") || "";
       lidarr = await getArtistData(queryParam);
       if (process.env.OVERRIDE_MB === "true") {
