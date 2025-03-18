@@ -1,3 +1,4 @@
+// helpers.ts
 import latinize from "latinize";
 
 /**
@@ -13,10 +14,10 @@ export function titleCase(str: string): string {
 
 /**
  * Normalisiert einen String:
- * - Kleinbuchstaben
- * - Akzente werden in ASCII umgewandelt (latinize)
- * - Alle nicht-alphanumerischen Zeichen (außer Leerzeichen) werden entfernt
- * - Überflüssiger Whitespace wird bereinigt
+ * - Umwandlung in Kleinbuchstaben
+ * - Umwandlung von Akzenten in ASCII (latinize)
+ * - Entfernt alle nicht-alphanumerischen Zeichen (außer Leerzeichen)
+ * - Bereinigt überflüssigen Whitespace
  */
 export function normalize(str: string): string {
   return latinize(str.toLowerCase())
@@ -39,4 +40,22 @@ export function removeKeys(obj: any, keys: string[]): any {
     }
   }
   return obj;
+}
+
+/**
+ * Fügt zwei Albumlisten zusammen, ohne Duplikate.
+ * Die Duplikaterkennung erfolgt anhand des normalisierten Titels.
+ */
+export function mergeAlbumLists(primary: any[], secondary: any[]): any[] {
+  const albumMap = new Map<string, any>();
+  for (const album of primary) {
+    albumMap.set(normalize(album.Title), album);
+  }
+  for (const album of secondary) {
+    const key = normalize(album.Title);
+    if (!albumMap.has(key)) {
+      albumMap.set(key, album);
+    }
+  }
+  return Array.from(albumMap.values());
 }

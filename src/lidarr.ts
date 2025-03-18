@@ -1,3 +1,4 @@
+// lidarr.ts
 import { normalize } from "./helpers.js";
 
 const lidarrApiUrl = "https://api.lidarr.audio";
@@ -7,9 +8,7 @@ const lidarrApiUrl = "https://api.lidarr.audio";
  */
 export async function getLidarrArtist(name: string): Promise<any | null> {
   try {
-    const res = await fetch(
-      `${lidarrApiUrl}/api/v0.4/search?type=all&query=${encodeURIComponent(name)}`
-    );
+    const res = await fetch(`${lidarrApiUrl}/api/v0.4/search?type=all&query=${encodeURIComponent(name)}`);
     if (!res.ok) {
       throw new Error(`HTTP error: ${res.status}`);
     }

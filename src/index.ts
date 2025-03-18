@@ -1,15 +1,9 @@
+// index.ts
 import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import _ from "lodash";
 import dotenv from "dotenv";
-import {
-  search,
-  getArtist,
-  getAlbum,
-  deemixArtist,
-  deemixAlbum,
-  deemixTracks,
-} from "./deemix.js";
+import { search, getArtist, getAlbum, deemixArtist } from "./deemix.js";
 import { removeKeys } from "./helpers.js";
 import { getArtistData } from "./artistData.js";
 
@@ -20,6 +14,12 @@ const scrobblerApiUrl = "https://ws.audioscrobbler.com";
 
 const fastify = Fastify({
   logger: { level: "error" },
+});
+
+// Zentraler Fehler-Handler
+fastify.setErrorHandler((error, request, reply) => {
+  console.error("Error:", error);
+  reply.status(500).send({ error: "Internal Server Error", message: error.message });
 });
 
 async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
@@ -78,19 +78,21 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     lidarr = await search(lidarr, queryParam, url.includes("type=all"));
   }
   if (url.includes("/v0.4/artist/")) {
-    if (url.includes("-aaaa-")) {
-      let id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
-      if (id) {
-        lidarr = await deemixArtist(id);
-        status = lidarr === null ? 404 : 200;
-      }
+    // Zuerst MusicBrainz-Daten abrufen
+    const queryParam = u.searchParams.get("query") || "";
+    const mbArtist = await getArtistData(queryParam);
+    if (mbArtist && mbArtist.Albums && mbArtist.Albums.length > 0) {
+      lidarr = mbArtist;
     } else {
-      // Hier wird getArtistData als Fallback genutzt
-      const queryParam = u.searchParams.get("query") || "";
-      lidarr = await getArtistData(queryParam);
-      if (process.env.OVERRIDE_MB === "true") {
-        status = 404;
-        lidarr = {};
+      // Falls kein MB-Datensatz gefunden wurde, Fallback zu Deemix
+      if (url.includes("-aaaa-")) {
+        let id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
+        if (id) {
+          lidarr = await deemixArtist(id);
+          status = lidarr === null ? 404 : 200;
+        }
+      } else {
+        lidarr = await deemixArtist(queryParam);
       }
     }
   }
@@ -122,6 +124,10 @@ fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
 });
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
+  if (err) {
+    console.error(err);
+    process.exit(1);
+  }
   console.log("Lidarr++Deemix running at " + address);
   if (process.env.OVERRIDE_MB === "true") {
     console.log("Overriding MusicBrainz API with Deemix API");

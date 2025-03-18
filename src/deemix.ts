@@ -1,21 +1,12 @@
+// deemix.ts
+import fetch from "node-fetch";
 import _ from "lodash";
-const deemixUrl = "http://127.0.0.1:7272";
+import { normalize, titleCase } from "./helpers.js";
+import { getArtistData } from "./artistData.js";
+import { mergeAlbumLists } from "./helpers.js";
 import { getAllLidarrArtists } from "./lidarr.js";
-import { titleCase, normalize } from "./helpers.js";
-import { link } from "fs";
 
-/**
- * Interface für ein dedupliziertes Album
- */
-export interface AlbumDTO {
-  Id: string;
-  OldIds: string[];
-  ReleaseStatuses: string[];
-  SecondaryTypes: string[];
-  Title: string;
-  LowerTitle: string;
-  Type: string;
-}
+const deemixUrl = process.env.DEEMIX_URL || "http://localhost:3000";
 
 /**
  * Erzeugt eine Fake-ID, die anhand des Typs einen Buchstaben-Prefix verwendet.
@@ -42,107 +33,125 @@ function isSimilar(title1: string, title2: string): boolean {
 /**
  * Entfernt Duplikate aus einer Albumliste anhand des Titels.
  */
-function deduplicateAlbums(albums: AlbumDTO[]): AlbumDTO[] {
-  const deduped: AlbumDTO[] = [];
+function deduplicateAlbums(albums: any[]): any[] {
+  const deduped: any[] = [];
   for (const album of albums) {
-    if (!deduped.some((a) => isSimilar(a.Title, album.Title))) {
+    if (!deduped.some((a) => normalize(a.Title) === normalize(album.Title))) {
       deduped.push(album);
     }
   }
   return deduped;
 }
 
+/**
+ * Ruft Künstler von Deemix ab.
+ */
 export async function deemixArtists(name: string): Promise<any[]> {
-  const res = await fetch(`${deemixUrl}/search/artists?limit=100&offset=0&q=${name}`);
+  const res = await fetch(`${deemixUrl}/search/artists?limit=100&offset=0&q=${encodeURIComponent(name)}`);
   const jsonRaw: unknown = await res.json();
-  // Falls jsonRaw kein Objekt ist, gib ein leeres Array zurück
   if (!jsonRaw || typeof jsonRaw !== "object") return [];
   const j = jsonRaw as any;
   return j["data"] as any[];
 }
 
+/**
+ * Ruft ein Album von Deemix ab.
+ */
 export async function deemixAlbum(id: string): Promise<any> {
   const res = await fetch(`${deemixUrl}/albums/${id}`);
-  const j = (await res.json()) as any;
+  const j = await res.json();
   return j;
 }
 
+/**
+ * Ruft die Tracks eines Albums von Deemix ab.
+ */
 export async function deemixTracks(id: string): Promise<any[]> {
   const res = await fetch(`${deemixUrl}/album/${id}/tracks`);
-  const j = (await res.json()) as any;
+  const j = await res.json();
   return j.data as any[];
 }
 
-export async function deemixArtist(id: string): Promise<any> {
-  const res = await fetch(`${deemixUrl}/artists/${id}`);
-  const j = (await res.json()) as any;
-  return {
-    Albums: j["albums"]["data"].map((a: any) => ({
-      Id: fakeId(a["id"], "album"),
-      OldIds: [],
-      ReleaseStatuses: ["Official"],
-      SecondaryTypes: a["title"].toLowerCase().includes("live") ? ["Live"] : [],
-      Title: a["title"],
-      Type: getType(a["record_type"]),
-    })),
-    artistaliases: [],
-    artistname: j["name"],
-    disambiguation: "",
-    genres: [],
-    id: `${fakeId(j["id"], "artist")}`,
-    images: [{ CoverType: "Poster", Url: j["picture_xl"] }],
-    links: [
-      {
+/**
+ * Ruft einen einzelnen Künstler von Deemix ab.
+ * Falls als Parameter eine ID übergeben wird, wird diese direkt genutzt,
+ * ansonsten wird anhand des Namens gesucht.
+ */
+export async function deemixArtist(idOrName: string): Promise<any> {
+  if (/\d/.test(idOrName)) {
+    const res = await fetch(`${deemixUrl}/artists/${idOrName}`);
+    const j = await res.json();
+    return {
+      Albums: j["albums"]["data"].map((a: any) => ({
+        Id: fakeId(a["id"], "album"),
+        OldIds: [],
+        ReleaseStatuses: ["Official"],
+        SecondaryTypes: a["title"].toLowerCase().includes("live") ? ["Live"] : [],
+        Title: a["title"],
+        LowerTitle: normalize(a["title"]),
+        Type: getType(a["record_type"]),
+      })),
+      artistaliases: [],
+      artistname: j["name"],
+      disambiguation: "",
+      genres: [],
+      id: fakeId(j["id"], "artist"),
+      images: [{ CoverType: "Poster", Url: j["picture_xl"] }],
+      links: [{
         target: j["link"],
         type: "deezer",
-      },
-    ],
-    oldids: [],
-    overview: "!!--Imported from Deemix--!!",
-    rating: { Count: 0, Value: null },
-    sortname: (j["name"] as string).split(" ").reverse().join(", "),
-    status: "active",
-    type: "Artist",
-  };
+      }],
+      oldids: [],
+      overview: "!!--Imported from Deemix--!!",
+      sortname: (j["name"] as string).split(" ").reverse().join(", "),
+      status: "active",
+      type: "Artist",
+    };
+  } else {
+    const artists = await deemixArtists(idOrName);
+    const artist = artists.find((a: any) => a["name"] === idOrName || normalize(a["name"]) === normalize(idOrName));
+    return artist ? artist : null;
+  }
 }
 
-// Exportiere getAritstByName (Hinweis: Name kann auch getArtistByName heißen)
-export async function getAritstByName(name: string): Promise<any> {
-  const artists = await deemixArtists(name);
-  const artist = artists.find((a: any) => a["name"] === name || normalize(a["name"]) === normalize(name));
-  return artist;
-}
-
+/**
+ * Sucht Alben von Deemix.
+ */
 export async function deemixAlbums(name: string): Promise<any[]> {
-  let total = 0;
-  let start = 0;
-  const res = await fetch(`${deemixUrl}/search/albums?limit=1&offset=0&q=${name}`);
+  const res = await fetch(`${deemixUrl}/search/albums?limit=1&offset=0&q=${encodeURIComponent(name)}`);
   const jsonRaw: unknown = await res.json();
   const j = jsonRaw as any;
-  total = j["total"] as number;
-  const albums: any[] = [];
-  while (start < total) {
-    const res2 = await fetch(`${deemixUrl}/search/albums?limit=100&offset=${start}&q=${name}`);
-    const jsonRaw2: unknown = await res2.json();
-    const j2 = jsonRaw2 as any;
-    albums.push(...(j2["data"] as any[]));
-    start += 100;
+  const total = j["total"] as number;
+  const promises = [];
+  for (let start = 0; start < total; start += 100) {
+    promises.push(
+      fetch(`${deemixUrl}/search/albums?limit=100&offset=${start}&q=${encodeURIComponent(name)}`)
+        .then(r => r.json())
+        .then(j2 => j2["data"] as any[])
+    );
   }
-  return albums.filter(
-    (a: any) =>
-      normalize(a["artist"]["name"]) === normalize(name) ||
-      a["artist"]["name"] === "Verschillende artiesten"
+  const results = await Promise.all(promises);
+  const albums = results.flat();
+  return albums.filter((a: any) =>
+    normalize(a["artist"]["name"]) === normalize(name) ||
+    a["artist"]["name"] === "Verschillende artiesten"
   );
 }
 
+/**
+ * Bestimmt den Typ basierend auf dem record_type.
+ */
 function getType(rc: string): string {
-  let type = rc.charAt(0).toUpperCase() + rc.slice(1);
+  let type = rc.charAt(0).toUpperCase() + rc.slice(1).toLowerCase();
   if (type === "Ep") {
     type = "EP";
   }
   return type;
 }
 
+/**
+ * Ruft ein Album samt Tracks und verknüpften Künstlern ab.
+ */
 export async function getAlbum(id: string): Promise<any> {
   const d = await deemixAlbum(id);
   const contributors = d["contributors"].map((c: any) => ({
@@ -160,23 +169,21 @@ export async function getAlbum(id: string): Promise<any> {
     type: "Artist",
   }));
   const lidarrArtists = await getAllLidarrArtists();
-  let lidarr: any = null;
-  let deemix: any = null;
+  let lidarr = null;
+  let deemixContributor = null;
   for (const la of lidarrArtists) {
     for (const c of contributors) {
-      if (
-        la["artistName"] === c["artistname"] ||
-        normalize(la["artistName"]) === normalize(c["artistname"])
-      ) {
+      if (la["artistName"] === c["artistname"] || normalize(la["artistName"]) === normalize(c["artistname"])) {
         lidarr = la;
-        deemix = c;
+        deemixContributor = c;
+        break;
       }
     }
   }
-  let lidarr2: any = {};
+  let lidarrArtist: any = {};
   if (process.env.OVERRIDE_MB === "true") {
-    lidarr = deemix;
-    lidarr2 = {
+    lidarr = deemixContributor;
+    lidarrArtist = {
       id: lidarr["id"],
       artistname: lidarr["artistname"],
       artistaliases: [],
@@ -191,7 +198,7 @@ export async function getAlbum(id: string): Promise<any> {
       type: "Artist",
     };
   } else {
-    lidarr2 = {
+    lidarrArtist = {
       id: lidarr!["foreignArtistId"],
       artistname: lidarr!["artistName"],
       artistaliases: [],
@@ -209,60 +216,59 @@ export async function getAlbum(id: string): Promise<any> {
   const tracks = await deemixTracks(d["id"]);
   return {
     aliases: [],
-    artistid: lidarr2["id"],
-    artists: [lidarr2],
+    artistid: lidarrArtist["id"],
+    artists: [lidarrArtist],
     disambiguation: "",
     genres: [],
-    id: `${fakeId(d["id"], "album")}`,
+    id: fakeId(d["id"], "album"),
     images: [{ CoverType: "Cover", Url: d["cover_xl"] }],
     links: [],
     oldids: [],
     overview: "!!--Imported from Deemix--!!",
     rating: { Count: 0, Value: null },
     releasedate: d["release_date"],
-    releases: [
-      {
-        country: ["Worldwide"],
-        disambiguation: "",
-        id: `${fakeId(d["id"], "release")}`,
-        label: [d["label"]],
-        media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
-          Format: "CD",
-          Name: "",
-          Position: t["disk_number"],
-        })),
+    releases: [{
+      country: ["Worldwide"],
+      disambiguation: "",
+      id: fakeId(d["id"], "release"),
+      label: [d["label"]],
+      media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
+        Format: "CD",
+        Name: "",
+        Position: t["disk_number"],
+      })),
+      oldids: [],
+      releasedate: d["release_date"],
+      status: "Official",
+      title: titleCase(d["title"]),
+      track_count: d["nb_tracks"],
+      tracks: tracks.map((t: any, idx: number) => ({
+        artistid: lidarrArtist["id"],
+        durationms: t["duration"] * 1000,
+        id: fakeId(t["id"], "track"),
+        mediumnumber: t["disk_number"],
         oldids: [],
-        releasedate: d["release_date"],
-        status: "Official",
-        title: titleCase(d["title"]),
-        track_count: d["nb_tracks"],
-        tracks: tracks.map((t: any, idx: number) => ({
-          artistid: lidarr2["id"],
-          durationms: t["duration"] * 1000,
-          id: `${fakeId(t["id"], "track")}`,
-          mediumnumber: t["disk_number"],
-          oldids: [],
-          oldrecordingids: [],
-          recordingid: fakeId(t["id"], "recording"),
-          trackname: t["title"],
-          tracknumber: `${idx + 1}`,
-          trackposition: idx + 1,
-        })),
-      },
-    ],
+        oldrecordingids: [],
+        recordingid: fakeId(t["id"], "recording"),
+        trackname: t["title"],
+        tracknumber: `${idx + 1}`,
+        trackposition: idx + 1,
+      })),
+    }],
     secondarytypes: d["title"].toLowerCase().includes("live") ? ["Live"] : [],
-    title: titleCase(d["title"]),
-    type: getType(d["record_type"]),
+    Title: titleCase(d["title"]),
+    LowerTitle: normalize(d["title"]),
+    Type: getType(d["record_type"]),
   };
 }
 
 /**
- * Holt Alben von Deemix, mappt sie in ein AlbumDTO-Array und entfernt Duplikate.
+ * Ruft Alben von Deemix ab, wandelt sie in AlbumDTOs um und entfernt Duplikate.
  */
-export async function getAlbums(name: string): Promise<AlbumDTO[]> {
+export async function getAlbums(name: string): Promise<any[]> {
   const dalbums = await deemixAlbums(name);
-  let dtoRalbums: AlbumDTO[] = dalbums.map((d: any) => ({
-    Id: `${fakeId(d["id"], "album")}`,
+  let dtoAlbums = dalbums.map((d: any) => ({
+    Id: fakeId(d["id"], "album"),
     OldIds: [],
     ReleaseStatuses: ["Official"],
     SecondaryTypes: d["title"].toLowerCase().includes("live") ? ["Live"] : [],
@@ -270,14 +276,13 @@ export async function getAlbums(name: string): Promise<AlbumDTO[]> {
     LowerTitle: normalize(d["title"]),
     Type: getType(d["record_type"]),
   }));
-  dtoRalbums = _.uniqBy(dtoRalbums, "LowerTitle");
-  dtoRalbums = deduplicateAlbums(dtoRalbums);
-  return dtoRalbums;
+  dtoAlbums = _.uniqBy(dtoAlbums, "LowerTitle");
+  dtoAlbums = deduplicateAlbums(dtoAlbums);
+  return dtoAlbums;
 }
 
 /**
- * Fügt beim Search die Deemix-Ergebnisse zu den Lidarr-Ergebnissen zusammen,
- * wobei vorhandene Künstler anhand des normalisierten Namens abgeglichen werden.
+ * Fügt beim Search die Deemix-Ergebnisse zu den Lidarr-Ergebnissen zusammen.
  */
 export async function search(lidarr: any, query: string, isManual: boolean = true): Promise<any> {
   const dartists = await deemixArtists(query);
@@ -296,10 +301,7 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
   if (lartist) {
     let dartist: any;
     for (const [i, d] of dartists.entries()) {
-      if (
-        lartist["artist"]["artistname"] === d["name"] ||
-        normalize(lartist["artist"]["artistname"]) === normalize(d["name"])
-      ) {
+      if (lartist["artist"]["artistname"] === d["name"] || normalize(lartist["artist"]["artistname"]) === normalize(d["name"])) {
         dartist = d;
         didx = i;
         break;
@@ -332,29 +334,22 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
       artistname: d["name"],
       sortname: (d["name"] as string).split(" ").reverse().join(", "),
       genres: [],
-      id: `${fakeId(d["id"], "artist")}`,
-      images: [
-        {
-          CoverType: "Poster",
-          Url: d["picture_xl"],
-        },
-      ],
-      links: [
-        {
-          target: d["link"],
-          type: "deezer",
-        },
-      ],
+      id: fakeId(d["id"], "artist"),
+      images: [{
+        CoverType: "Poster",
+        Url: d["picture_xl"],
+      }],
+      links: [{
+        target: d["link"],
+        type: "deezer",
+      }],
       type: (d["type"] as string).charAt(0).toUpperCase() + (d["type"] as string).slice(1),
     },
   }));
   if (lidarr.length === 0) {
     const sorted: any[] = [];
     for (const a of dtolartists) {
-      if (
-        a.artist.artistname === decodeURIComponent(query) ||
-        normalize(a.artist.artistname) === normalize(decodeURIComponent(query))
-      ) {
+      if (a.artist.artistname === decodeURIComponent(query) || normalize(a.artist.artistname) === normalize(decodeURIComponent(query))) {
         sorted.unshift(a);
       } else {
         sorted.push(a);
@@ -367,10 +362,7 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
     if (process.env.OVERRIDE_MB === "true") {
       dtolartists = [
         dtolartists.filter((a: any) => {
-          return (
-            a["artistname"] === decodeURIComponent(query) ||
-            normalize(a["artistname"]) === normalize(decodeURIComponent(query))
-          );
+          return (a["artistname"] === decodeURIComponent(query) || normalize(a["artistname"]) === normalize(decodeURIComponent(query)));
         })[0],
       ];
     }
@@ -382,50 +374,25 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
   return lidarr;
 }
 
+/**
+ * Holt den finalen Künstler-Datensatz.
+ * Priorität: MusicBrainz (getArtistData) > Deezer/Deemix.
+ * Bei vorhandenen MusicBrainz-Daten werden nur fehlende Alben ergänzt.
+ */
 export async function getArtist(lidarr: any): Promise<any> {
   if (lidarr["error"]) return lidarr;
-  const artist = await getAritstByName(lidarr["artistname"]);
-  if (typeof artist === "undefined") {
-    return lidarr;
-  }
-  let posterFound = false;
-  for (const img of lidarr["images"] as any[]) {
-    if (img["CoverType"] === "Poster") {
-      posterFound = true;
-      break;
+  const mbArtist = await getArtistData(lidarr["artistname"]);
+  if (mbArtist && mbArtist.Albums && mbArtist.Albums.length > 0) {
+    const deemixAlbums = await getAlbums(lidarr["artistname"]);
+    mbArtist.Albums = mergeAlbumLists(mbArtist.Albums, deemixAlbums);
+    if (!mbArtist.images || mbArtist.images.length === 0) {
+      const dArtist = await deemixArtist(lidarr["artistname"]);
+      if (dArtist && dArtist.images && dArtist.images.length > 0) {
+        mbArtist.images = dArtist.images;
+      }
     }
-  }
-  if (!posterFound) {
-    (lidarr["images"] as any[]).push({
-      CoverType: "Poster",
-      Url: artist["picture_xl"],
-    });
-  }
-  const albums = await getAlbums(lidarr["artistname"]);
-  let existing = lidarr["Albums"].map((a: any) => normalize(a["Title"]));
-  if (process.env.PRIO_DEEMIX === "true") {
-    existing = albums.map((a: any) => normalize(a["Title"]));
-  }
-  if (process.env.OVERRIDE_MB === "true") {
-    lidarr["images"] = [
-      {
-        CoverType: "Poster",
-        Url: artist["picture_xl"],
-      },
-    ];
-    lidarr["Albums"] = albums;
+    return mbArtist;
   } else {
-    if (process.env.PRIO_DEEMIX === "true") {
-      lidarr["Albums"] = [
-        ...lidarr["Albums"].filter((a: any) => !existing.includes(normalize(a["Title"]))),
-        ...albums,
-      ];
-    } else {
-      lidarr["Albums"] = [
-        ...lidarr["Albums"],
-        ...albums.filter((a: any) => !existing.includes(normalize(a["Title"]))),
-      ];
-    }
+    return await deemixArtist(lidarr["artistname"]);
   }
-  return lidarr;
 }
