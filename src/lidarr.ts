@@ -4,7 +4,6 @@ const lidarrApiUrl = "https://api.lidarr.audio";
 
 /**
  * Sucht einen einzelnen Künstler in Lidarr anhand des Namens.
- * Es wird geprüft, ob der zurückgegebene Datensatz kein Album (album === null) enthält und der normalisierte Künstlername exakt passt.
  */
 export async function getLidarrArtist(name: string): Promise<any | null> {
   try {
@@ -14,7 +13,6 @@ export async function getLidarrArtist(name: string): Promise<any | null> {
     if (!res.ok) {
       throw new Error(`HTTP error: ${res.status}`);
     }
-    // Hole den Rohwert und prüfe, ob es sich um ein Array handelt
     const jsonRaw: unknown = await res.json();
     if (!Array.isArray(jsonRaw)) {
       throw new Error("Erwartetes Array nicht erhalten");
@@ -35,7 +33,6 @@ export async function getLidarrArtist(name: string): Promise<any | null> {
 
 /**
  * Holt alle Künstler aus der Lidarr-Instanz.
- * URL und API-Key werden über Umgebungsvariablen (LIDARR_URL und LIDARR_API_KEY) bezogen.
  */
 export async function getAllLidarrArtists(): Promise<any[]> {
   try {
