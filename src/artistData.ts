@@ -3,7 +3,7 @@ import { getAritstByName } from "./deemix.js";
 
 /**
  * Sucht einen Künstler anhand des Namens:
- * 1. Primär über Lidarr/MusicBrainz (getLidarrArtist)
+ * 1. Primär: Über Lidarr/MusicBrainz (getLidarrArtist)
  * 2. Falls kein Ergebnis gefunden wird und FALLBACK_DEEZER nicht auf "false" gesetzt ist,
  *    wird Deezer/Deemix (getAritstByName) genutzt.
  */

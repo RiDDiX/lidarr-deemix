@@ -19,7 +19,7 @@ export interface AlbumDTO {
 }
 
 /**
- * Erzeugt eine Fake-ID anhand des Typs.
+ * Erzeugt eine Fake-ID, die anhand des Typs einen Buchstaben-Prefix verwendet.
  */
 function fakeId(id: string | number, type: string): string {
   let p = "a";
@@ -54,45 +54,52 @@ function deduplicateAlbums(albums: AlbumDTO[]): AlbumDTO[] {
 }
 
 /**
- * Liest die verfügbaren Formate aus der API-Antwort.
- * Falls das Feld availableFormats nicht existiert, wird basierend auf DEEMIX_PREMIUM ein Standard gesetzt.
+ * Liest aus der Deemix-API eine Künstlerliste ein.
  */
-function getAvailableFormatsFromResponse(response: any): string[] {
-  if (response && response.availableFormats && Array.isArray(response.availableFormats)) {
-    return response.availableFormats;
-  }
-  if (process.env.DEEMIX_PREMIUM === "true") {
-    return ["flac", "mp3_320", "mp3_128"];
-  }
-  return ["mp3_128"];
-}
-
 export async function deemixArtists(name: string): Promise<any[]> {
   const res = await fetch(`${deemixUrl}/search/artists?limit=100&offset=0&q=${name}`);
   const jsonRaw: unknown = await res.json();
   if (!jsonRaw || typeof jsonRaw !== "object") return [];
-  const j = jsonRaw as any;
+  const j = jsonRaw as Record<string, any>;
   return j["data"] as any[];
 }
 
+/**
+ * Liest ein Album von Deemix ein.
+ */
 export async function deemixAlbum(id: string): Promise<any> {
   const res = await fetch(`${deemixUrl}/albums/${id}`);
-  return await res.json();
+  const jsonRaw: unknown = await res.json();
+  if (!jsonRaw || typeof jsonRaw !== "object")
+    throw new Error("Unexpected response in deemixAlbum");
+  const j = jsonRaw as Record<string, any>;
+  return j;
 }
 
+/**
+ * Liest die Tracks eines Albums ein.
+ */
 export async function deemixTracks(id: string): Promise<any[]> {
   const res = await fetch(`${deemixUrl}/album/${id}/tracks`);
-  const j = await res.json();
+  const jsonRaw: unknown = await res.json();
+  if (!jsonRaw || typeof jsonRaw !== "object") return [];
+  const j = jsonRaw as Record<string, any>;
   return j.data as any[];
 }
 
+/**
+ * Liest einen Künstler von Deemix ein.
+ */
 export async function deemixArtist(id: string): Promise<any> {
   const res = await fetch(`${deemixUrl}/artists/${id}`);
-  const j = await res.json();
+  const jsonRaw: unknown = await res.json();
+  if (!jsonRaw || typeof jsonRaw !== "object")
+    throw new Error("Unexpected response in deemixArtist");
+  const j = jsonRaw as Record<string, any>;
   return {
     Albums: j["albums"]["data"].map((a: any) => ({
       Id: fakeId(a["id"], "album"),
-      OldIds: [],
+      OldIds: [] as string[],
       ReleaseStatuses: ["Official"],
       SecondaryTypes: a["title"].toLowerCase().includes("live") ? ["Live"] : [],
       Title: a["title"],
@@ -119,24 +126,32 @@ export async function deemixArtist(id: string): Promise<any> {
   };
 }
 
-// Exportiere getAritstByName, um ihn im Fallback zu nutzen
+/**
+ * Exportiere getAritstByName (Bedenke: Du kannst den Namen in getArtistByName umbenennen, wenn gewünscht).
+ */
 export async function getAritstByName(name: string): Promise<any> {
   const artists = await deemixArtists(name);
   return artists.find((a: any) => a["name"] === name || normalize(a["name"]) === normalize(name));
 }
 
+/**
+ * Liest Alben von Deemix ein.
+ */
 export async function deemixAlbums(name: string): Promise<any[]> {
   let total = 0;
   let start = 0;
   const res = await fetch(`${deemixUrl}/search/albums?limit=1&offset=0&q=${name}`);
   const jsonRaw: unknown = await res.json();
-  const j = jsonRaw as any;
+  if (!jsonRaw || typeof jsonRaw !== "object")
+    throw new Error("Unexpected response in deemixAlbums");
+  const j = jsonRaw as Record<string, any>;
   total = j["total"] as number;
   const albums: any[] = [];
   while (start < total) {
     const res2 = await fetch(`${deemixUrl}/search/albums?limit=100&offset=${start}&q=${name}`);
     const jsonRaw2: unknown = await res2.json();
-    const j2 = jsonRaw2 as any;
+    if (!jsonRaw2 || typeof jsonRaw2 !== "object") break;
+    const j2 = jsonRaw2 as Record<string, any>;
     albums.push(...(j2["data"] as any[]));
     start += 100;
   }
@@ -147,12 +162,29 @@ export async function deemixAlbums(name: string): Promise<any[]> {
   );
 }
 
+/**
+ * Bestimmt die verfügbaren Formate.
+ * Wird in der Antwort als availableFormats zurückgegeben.
+ */
+function getAvailableFormatsFromResponse(response: any): string[] {
+  if (response && response.availableFormats && Array.isArray(response.availableFormats)) {
+    return response.availableFormats;
+  }
+  if (process.env.DEEMIX_PREMIUM === "true") {
+    return ["flac", "mp3_320", "mp3_128"];
+  }
+  return ["mp3_128"];
+}
+
 function getType(rc: string): string {
   let type = rc.charAt(0).toUpperCase() + rc.slice(1);
   if (type === "Ep") type = "EP";
   return type;
 }
 
+/**
+ * Liest ein Album ein und erweitert die Antwort um verfügbare Formate.
+ */
 export async function getAlbum(id: string): Promise<any> {
   const d = await deemixAlbum(id);
   const availableFormats = getAvailableFormatsFromResponse(d);
@@ -165,7 +197,7 @@ export async function getAlbum(id: string): Promise<any> {
     genres: [],
     images: [],
     links: [],
-    oldids: [],
+    oldids: [] as string[],
     sortname: (c["name"] as string).split(" ").reverse().join(", "),
     status: "active",
     type: "Artist",
@@ -196,7 +228,7 @@ export async function getAlbum(id: string): Promise<any> {
       genres: [],
       images: [],
       links: [],
-      oldids: [],
+      oldids: [] as string[],
       sortname: lidarr["artistname"].split(" ").reverse().join(", "),
       status: "active",
       type: "Artist",
@@ -211,7 +243,7 @@ export async function getAlbum(id: string): Promise<any> {
       genres: [],
       images: [],
       links: [],
-      oldids: [],
+      oldids: [] as string[],
       sortname: lidarr!["artistName"].split(" ").reverse().join(", "),
       status: "active",
       type: "Artist",
@@ -227,11 +259,11 @@ export async function getAlbum(id: string): Promise<any> {
     id: `${fakeId(d["id"], "album")}`,
     images: [{ CoverType: "Cover", Url: d["cover_xl"] }],
     links: [],
-    oldids: [],
+    oldids: [] as string[],
     overview: "!!--Imported from Deemix--!!",
     rating: { Count: 0, Value: null },
     releasedate: d["release_date"],
-    availableFormats,  // Hier werden alle verfügbaren Formate aufgeführt
+    availableFormats,
     releases: [
       {
         country: ["Worldwide"],
@@ -243,7 +275,7 @@ export async function getAlbum(id: string): Promise<any> {
           Name: "",
           Position: t["disk_number"],
         })),
-        oldids: [],
+        oldids: [] as string[],
         releasedate: d["release_date"],
         status: "Official",
         title: titleCase(d["title"]),
@@ -253,8 +285,8 @@ export async function getAlbum(id: string): Promise<any> {
           durationms: t["duration"] * 1000,
           id: `${fakeId(t["id"], "track")}`,
           mediumnumber: t["disk_number"],
-          oldids: [],
-          oldrecordingids: [],
+          oldids: [] as string[],
+          oldrecordingids: [] as string[],
           recordingid: fakeId(t["id"], "recording"),
           trackname: t["title"],
           tracknumber: `${idx + 1}`,
@@ -269,13 +301,13 @@ export async function getAlbum(id: string): Promise<any> {
 }
 
 /**
- * Holt Alben von Deemix, mappt sie in ein AlbumDTO-Array und entfernt Duplikate.
+ * Liest Alben von Deemix ein, mappt sie in ein AlbumDTO-Array und entfernt Duplikate.
  */
 export async function getAlbums(name: string): Promise<AlbumDTO[]> {
   const dalbums = await deemixAlbums(name);
   let dtoRalbums: AlbumDTO[] = dalbums.map((d: any) => ({
     Id: `${fakeId(d["id"], "album")}`,
-    OldIds: [],
+    OldIds: [] as string[],
     ReleaseStatuses: ["Official"],
     SecondaryTypes: d["title"].toLowerCase().includes("live") ? ["Live"] : [],
     Title: titleCase(d["title"]),
