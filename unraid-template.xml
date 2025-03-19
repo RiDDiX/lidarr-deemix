@@ -7,12 +7,12 @@
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support/>
+  <Support>https://github.com/RiDDiX/lidarr-deemix/discussions</Support>
   <Project/>
   <Overview/>
   <Category/>
   <WebUI/>
-  <TemplateURL/>
+  <TemplateURL>https://raw.githubusercontent.com/RiDDiX/lidarr-deemix/refs/heads/main/unraid-template.xml</TemplateURL>
   <Icon/>
   <ExtraParams/>
   <PostArgs/>
