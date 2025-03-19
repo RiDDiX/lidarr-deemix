@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>lidarr-deemix</Name>
+  <Repository>ghcr.io/riddix/lidarr-deemix:latest</Repository>
+  <Registry/>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project/>
+  <Overview/>
+  <Category/>
+  <WebUI/>
+  <TemplateURL/>
+  <Icon/>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Proxy" Target="8080" Default="" Mode="tcp" Description="Port for Proxy" Type="Port" Display="always" Required="true" Mask="false">16080</Config>
+  <Config Name="DEEMIX_ARL" Target="DEEMIX_ARL" Default="" Mode="" Description="Your Deezer ARL Token to obtain Artits / Albums" Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="OVERRIDE_MB" Target="OVERRIDE_MB" Default="false" Mode="" Description="Only use Deezer Artists / Albums instead of MusicBrainz" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="PRIO_DEEMIX" Target="PRIO_DEEMIX" Default="" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="LIDARR_URL" Target="LIDARR_URL" Default="" Mode="" Description="Your Lidarr Instance URL" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="LIDARR_API_KEY" Target="LIDARR_API_KEY" Default="" Mode="" Description="Your Lidarr Instance API Key" Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="FALLBACK_DEEZER" Target="FALLBACK_DEEZER" Default="" Mode="" Description="If Deezer should used as Fallback instead of force using Deezer-IDs" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <TailscaleStateDir/>
+</Container>
