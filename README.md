@@ -1,58 +1,129 @@
-Its a Fork. Added Deemix as a Fallback (if nothing is found), also a check for albums that there shouldnt be anything doubled or even more clones. 
+# Lidarr++Deemix
 
-Just a little work within my short spare time.
+> **"If Lidarr and Deemix had a child"**
 
 <div align="center">
-<img src="./images/logo.webp" height="200" /><br />
-<h1>Lidarr++Deemix</h1>
-<h4 style="font-style: italic">"If Lidarr and Deemix had a child"</h4>
+  <img src="./images/logo.webp" height="200" /><br />
 </div>
 
-![container](https://github.com/ad-on-is/lidarr-deemix/actions/workflows/container.yml/badge.svg?branch=)
-[![Version](https://img.shields.io/github/tag/ad-on-is/lidarr-deemix.svg?style=flat?branch=)]()
-[![GitHub stars](https://img.shields.io/github/stars/ad-on-is/lidarr-deemix.svg?style=social&label=Star)]()
-[![GitHub watchers](https://img.shields.io/github/watchers/ad-on-is/lidarr-deemix.svg?style=social&label=Watch)]()
-[![GitHub forks](https://img.shields.io/github/forks/ad-on-is/lidarr-deemix.svg?style=social&label=Fork)]()
+[![container](https://github.com/RiDDiX/lidarr-deemix/actions/workflows/container.yml/badge.svg?branch=)](https://github.com/RiDDiX/lidarr-deemix/actions/workflows/container.yml)
+[![Version](https://img.shields.io/github/tag/RiDDiX/lidarr-deemix.svg?style=flat)]()
+[![GitHub stars](https://img.shields.io/github/stars/RiDDiX/lidarr-deemix.svg?style=social&label=Star)]()
+[![GitHub watchers](https://img.shields.io/github/watchers/RiDDiX/lidarr-deemix.svg?style=social&label=Watch)]()
+[![GitHub forks](https://img.shields.io/github/forks/RiDDiX/lidarr-deemix.svg?style=social&label=Fork)]()
 
-## 💡 How it works
+---
 
-Lidarr usually pulls artist and album infos from their own api api.lidarr.audio, which pulls the data from MusicBrainz.
+## Overview
 
-However, MusicBrainz does not have many artists/albums, especially for some regional _niche_ artist.
+Lidarr++Deemix extends your existing Lidarr installation by injecting additional artist and album data from Deemix/Deezer—without modifying Lidarr itself.  
+By default, data is retrieved from MusicBrainz (which Lidarr normally uses) and, if an artist or album is missing (especially niche or regional content), the fallback source is Deemix.
 
-This tool helps to enrich Lidarr, by providing a custom proxy, that _hooks into_ the process _without modifying Lidarr itself_, and **_injects additional artists/albums from deemix_**.
+### Key Features
 
-#### To do that, the following steps are performed:
+- **Fallback Integration:**  
+  Data is primarily fetched from MusicBrainz (via `artistData.ts`). If an artist or album is missing, Deemix/Deezer is queried instead.
 
-- [mitmproxy](https://mitmproxy.org/) runs as a proxy
-- Lidarr needs to be configured to use that proxy.
-- The proxy then **_redirects all_** api.lidarr.audio calls to an internally running **NodeJS service** (_127.0.0.1:7171_)
-- That NodeJS service **enriches** the missing artists/albums with the ones found in deemix
-- Lidarr has now additiona artists/albums, and can do its thing.
+- **Enhanced Duplicate Prevention:**  
+  An improved merging algorithm compares normalized titles as well as track counts and track names. This ensures that variants such as "Album" and "Album (Deluxe)" are recognized as duplicates and not added twice.
 
-## 💻️ Installation
+- **MITM Proxy Integration:**  
+  Using [mitmproxy](https://mitmproxy.org/), Lidarr's API calls are intercepted and routed through our NodeJS service (running on port 7171), which enriches the responses with additional data.
 
-> [!CAUTION]
-> If you have installed an older version, please adjust the Proxy settings as described below, otherwise the HTTP-requests will fail
+- **Performance Optimizations:**  
+  Asynchronous batch requests and centralized error handling ensure efficient API calls and system stability under load.
 
-> [!WARNING]
-> This image does not come with Lidarr nor with the deemix-gui. It's an addition to your existing setup.
+---
 
-> [!NOTE]
-> The previous setup required to map additional volumes for certificate validation. Thx to @codefaux, here's now a simpler way for installation.
+## Changelog
 
-- Use the provided [docker-compose.yml](./docker-compose.yml) as an example.
-  - **DEEMIX_ARL=xxx** your deezer ARL (get it from your browsers cookies)
-  - **PRIO_DEEMIX=true** If albums with the same name exist, prioritize the ones comming from deemix
-  - **OVERRIDE_MB=true** override MusicBrainz completely - **WARNING!** This will delete all your artists/albums imported from MusicBrainz.
-  - **LIDARR_URL=http://lidarr:8686** The URL of your Lidarr instance (with port), so this library can communicate with it. Important for **OVERRIDE_MB**
-  - **LIDARR_API_KEY=xxx** The Lidarr API Key. Important for **OVERRIDE_MB**
-- Go to **Lidarr -> Settings -> General**
-  - **Certificate Validation:** to _Disabled_
-  - **Use Proxy:** ✅
-  - **Proxy Type:** HTTP(S)
-  - **Hostname:** container-name/IP of the machine where lidarr-deemix is running
-  - **Port:** 8080 (if using container-name), otherwise the port you exposed the service to
-  - **Bypass Proxy for local addresses:** ✅
+### Version 0.21 (2025-03-18)
+
+- **Enhanced Duplicate Detection:**  
+  - Introduced the `removeModifiers` function in `helpers.ts` to strip common modifiers like "Deluxe", "Remastered", "Edition", etc. from album titles.
+  - Updated `areAlbumsDuplicate` to compare not only normalized titles but also track counts and sorted, normalized track names.
+  - Added a new merge function `mergeAlbumListsEnhanced` that replaces the old logic and prevents duplicate entries even when there are slight title variations.
+
+- **Improved Fallback Logic:**  
+  - When MusicBrainz data is incomplete or missing, the fallback to Deemix/Deezer is activated.  
+  - The enhanced duplicate check is integrated into the fallback process, ensuring that albums with minor variations (e.g., "Album" vs. "Album (Deluxe)") are treated as identical.
+
+- **Performance & Stability:**  
+  - Asynchronous batch requests in Deemix functions (e.g., album fetching) have been optimized.
+  - Centralized error handling in the Fastify server provides increased robustness during high load.
+
+### Version 0.1
+
+- **Initial Version:**  
+  - Integrated Deemix as a fallback for missing MusicBrainz data.
+  - Basic duplicate prevention using normalized titles.
+  - MITM proxy setup to intercept Lidarr API calls and enrich responses with additional data.
+
+---
+
+## 💡 How It Works
+
+Lidarr normally retrieves artist and album data from its API ([api.lidarr.audio](https://api.lidarr.audio)), which sources information from MusicBrainz.  
+Since MusicBrainz often lacks data for regional or niche artists, this tool acts as a proxy that enriches Lidarr's data by querying Deemix/Deezer.
+
+**Detailed Steps:**
+
+1. **MITM Proxy:**  
+   - [mitmproxy](https://mitmproxy.org/) intercepts the data traffic from Lidarr.
+   - Lidarr is configured to route all API calls through the NodeJS service (running on port 7171).
+
+2. **Data Enrichment:**  
+   - **Primary Source:** Data is first fetched from MusicBrainz (via `artistData.ts`).
+   - **Fallback Source:** If data is missing or incomplete, Deemix/Deezer is queried.
+   - **Merge Process:** The enhanced merge algorithm combines album lists from both sources while preventing duplicates.
+
+3. **Duplicate Check:**  
+   - In addition to comparing normalized titles, the system checks track counts and track names.
+   - Variants like “Album” and “Album (Deluxe)” are recognized as the same if all other data (such as track list) is identical.
+
+---
+
+## 💻 Installation
+
+> **Note:**  
+> This image does not include Lidarr or the Deemix GUI – it is an addition to your existing setup.
+
+1. **Docker Setup:**  
+   Use the provided [docker-compose.yml](./docker-compose.yml) as an example.
+   - **Environment Variables:**  
+     - **DEEMIX_ARL=xxx:** Your Deezer ARL (obtain from your browser's cookies).  
+     - **PRIO_DEEMIX=true:** Prioritize Deemix albums when duplicate names are found.  
+     - **OVERRIDE_MB=true:** Override MusicBrainz data – **WARNING!** This will remove all previously imported MusicBrainz data.  
+     - **LIDARR_URL=http://lidarr:8686:** The URL of your Lidarr instance (with port) for communication (important for OVERRIDE_MB).  
+     - **LIDARR_API_KEY=xxx:** Your Lidarr API key.
+
+2. **Lidarr Configuration:**  
+   In **Lidarr → Settings → General**, set:
+   - **Certificate Validation:** Disabled.
+   - **Use Proxy:** Enabled.
+   - **Proxy Type:** HTTP(S)
+   - **Hostname:** The container name/IP of the machine running Lidarr++Deemix.
+   - **Port:** 8080 (or the port you have exposed).
+   - **Bypass Proxy for local addresses:** Enabled.
 
 ![settings](./images/lidarr-deemix-conf.png)
+
+---
+
+## Summary
+
+- **Enrichment:**  
+  Lidarr is enriched with additional artist and album data from Deemix/Deezer, especially for regional or niche content.
+
+- **No Duplicates:**  
+  Enhanced duplicate detection (based on normalized titles, track count, and track names) ensures that albums are not added more than once—even if variants like "(Deluxe)" are present.
+
+- **Flexible Fallback Options:**  
+  MusicBrainz data is preferred by default; only when missing or incomplete does the system fall back to Deemix/Deezer.
+
+---
+
+## License & Acknowledgements
+
+This project is a fork, expanded and optimized during my spare time.  
+Many thanks to all contributors, and especially to @codefaux for previous improvements regarding certificate validation.
