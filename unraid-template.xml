@@ -12,7 +12,7 @@
   <Overview/>
   <Category/>
   <WebUI/>
-  <TemplateURL>https://raw.githubusercontent.com/RiDDiX/lidarr-deemix/refs/heads/main/unraid-template.xml</TemplateURL>
+  <TemplateURL>https://github.com/RiDDiX/lidarr-deemix/blob/main/unraid-template.xml</TemplateURL>
   <Icon/>
   <ExtraParams/>
   <PostArgs/>
