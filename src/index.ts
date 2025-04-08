@@ -24,7 +24,6 @@ fastify.setErrorHandler((error, request, reply) => {
 
 // Hilfsfunktion: Liefert den Body nur, wenn die Methode das erlaubt
 function getRequestBody(req: FastifyRequest): undefined | string {
-  // GET und HEAD dürfen keinen Body haben
   if (req.method === "GET" || req.method === "HEAD") return undefined;
   return req.body ? req.body.toString() : undefined;
 }
@@ -33,17 +32,13 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
-  const bodyValue = getRequestBody(req); // Body nur verwenden, wenn erlaubt
+  const bodyValue = getRequestBody(req);
   let status = 200;
-  
-  // Kopiere alle Header außer "host" und "connection"
   const nh: { [key: string]: any } = {};
+  // Kopiere alle Header außer "host" und "connection"
   Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") {
-      nh[key] = value;
-    }
+    if (key !== "host" && key !== "connection") nh[key] = value;
   });
-  
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
@@ -56,19 +51,20 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
   } catch (e) {
     console.error(e);
   }
-  
   res.statusCode = status;
-  res.headers = data?.headers || {};
-  
-  // Versuche, die Antwort als JSON zu parsen
+  // Setze die empfangenen Headers mittels res.header() statt direkter Zuweisung
+  if (data && data.headers && typeof data.headers.forEach === "function") {
+    data.headers.forEach((value, key) => {
+      res.header(key, value);
+    });
+  }
   let json;
   try {
     json = await data?.json();
   } catch (e) {
-    console.error("Fehler beim Parsen des JSON:", e);
+    console.error("Fehler beim Parsen des JSON", e);
     json = {};
   }
-  
   if (process.env.OVERRIDE_MB === "true") {
     json = removeKeys(json, ["mbid"]);
   }
@@ -79,17 +75,13 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
-  const bodyValue = getRequestBody(req); // Nur Body verwenden, wenn erlaubt
+  const bodyValue = getRequestBody(req);
   let status = 200;
-  
-  // Kopiere alle Header außer "host" und "connection"
   const nh: { [key: string]: any } = {};
+  // Kopiere alle Header außer "host" und "connection"
   Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") {
-      nh[key] = value;
-    }
+    if (key !== "host" && key !== "connection") nh[key] = value;
   });
-  
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
@@ -102,22 +94,18 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
   } catch (e) {
     console.error(e);
   }
-  
   let lidarr: any;
   try {
     lidarr = await data?.json();
   } catch (e) {
     console.error(e);
   }
-  
-  // Suche nach /v0.4/search
   if (url.includes("/v0.4/search")) {
     const queryParam = u.searchParams.get("query") || "";
     lidarr = await search(lidarr, queryParam, url.includes("type=all"));
   }
-  
-  // Für /v0.4/artist/ wird zuerst MusicBrainz abgerufen, dann ggf. Fallback zu Deemix
   if (url.includes("/v0.4/artist/")) {
+    // Zuerst MusicBrainz-Daten abrufen
     const queryParam = u.searchParams.get("query") || "";
     const mbArtist = await getArtistData(queryParam);
     if (mbArtist && mbArtist.Albums && mbArtist.Albums.length > 0) {
@@ -134,8 +122,6 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
       }
     }
   }
-  
-  // Für /v0.4/album/ Fallback zu getAlbum
   if (url.includes("/v0.4/album/")) {
     if (url.includes("-bbbb-")) {
       let id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
@@ -145,14 +131,13 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
       }
     }
   }
-  
-  if (data?.headers && data.headers.delete) {
-    data.headers.delete("content-encoding");
+  if (data && data.headers && typeof data.headers.forEach === "function") {
+    data.headers.forEach((value, key) => {
+      res.header(key, value);
+    });
   }
-  
   console.log(status, method, url);
   res.statusCode = status;
-  res.headers = data?.headers || {};
   return { newres: res, data: lidarr };
 }
 
