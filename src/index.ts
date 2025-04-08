@@ -22,27 +22,53 @@ fastify.setErrorHandler((error, request, reply) => {
   reply.status(500).send({ error: "Internal Server Error", message: error.message });
 });
 
+// Hilfsfunktion: Liefert den Body nur, wenn die Methode das erlaubt
+function getRequestBody(req: FastifyRequest): undefined | string {
+  // GET und HEAD dürfen keinen Body haben
+  if (req.method === "GET" || req.method === "HEAD") return undefined;
+  return req.body ? req.body.toString() : undefined;
+}
+
 async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
-  const body = req.body ? req.body.toString() : "";
+  const bodyValue = getRequestBody(req); // Body nur verwenden, wenn erlaubt
   let status = 200;
+  
+  // Kopiere alle Header außer "host" und "connection"
   const nh: { [key: string]: any } = {};
   Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") nh[key] = value;
+    if (key !== "host" && key !== "connection") {
+      nh[key] = value;
+    }
   });
+  
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
-    data = await fetch(`${scrobblerApiUrl}${url}`, { method, body, headers: nh });
+    const fetchOptions: any = { method, headers: nh };
+    if (bodyValue !== undefined) {
+      fetchOptions.body = bodyValue;
+    }
+    data = await fetch(`${scrobblerApiUrl}${url}`, fetchOptions);
     status = data.status;
   } catch (e) {
     console.error(e);
   }
+  
   res.statusCode = status;
-  res.headers = data?.headers as any;
-  let json = await data?.json();
+  res.headers = data?.headers || {};
+  
+  // Versuche, die Antwort als JSON zu parsen
+  let json;
+  try {
+    json = await data?.json();
+  } catch (e) {
+    console.error("Fehler beim Parsen des JSON:", e);
+    json = {};
+  }
+  
   if (process.env.OVERRIDE_MB === "true") {
     json = removeKeys(json, ["mbid"]);
   }
@@ -53,38 +79,50 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
-  const body = req.body ? req.body.toString() : "";
+  const bodyValue = getRequestBody(req); // Nur Body verwenden, wenn erlaubt
   let status = 200;
+  
+  // Kopiere alle Header außer "host" und "connection"
   const nh: { [key: string]: any } = {};
   Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") nh[key] = value;
+    if (key !== "host" && key !== "connection") {
+      nh[key] = value;
+    }
   });
+  
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
-    data = await fetch(`${lidarrApiUrl}${url}`, { method, body, headers: nh });
+    const fetchOptions: any = { method, headers: nh };
+    if (bodyValue !== undefined) {
+      fetchOptions.body = bodyValue;
+    }
+    data = await fetch(`${lidarrApiUrl}${url}`, fetchOptions);
     status = data.status;
   } catch (e) {
     console.error(e);
   }
+  
   let lidarr: any;
   try {
     lidarr = await data?.json();
   } catch (e) {
     console.error(e);
   }
+  
+  // Suche nach /v0.4/search
   if (url.includes("/v0.4/search")) {
     const queryParam = u.searchParams.get("query") || "";
     lidarr = await search(lidarr, queryParam, url.includes("type=all"));
   }
+  
+  // Für /v0.4/artist/ wird zuerst MusicBrainz abgerufen, dann ggf. Fallback zu Deemix
   if (url.includes("/v0.4/artist/")) {
-    // Zuerst MusicBrainz-Daten abrufen
     const queryParam = u.searchParams.get("query") || "";
     const mbArtist = await getArtistData(queryParam);
     if (mbArtist && mbArtist.Albums && mbArtist.Albums.length > 0) {
       lidarr = mbArtist;
     } else {
-      // Falls kein MB-Datensatz gefunden wurde, Fallback zu Deemix
       if (url.includes("-aaaa-")) {
         let id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
         if (id) {
@@ -96,6 +134,8 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
       }
     }
   }
+  
+  // Für /v0.4/album/ Fallback zu getAlbum
   if (url.includes("/v0.4/album/")) {
     if (url.includes("-bbbb-")) {
       let id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
@@ -105,10 +145,14 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
       }
     }
   }
-  data?.headers.delete("content-encoding");
+  
+  if (data?.headers && data.headers.delete) {
+    data.headers.delete("content-encoding");
+  }
+  
   console.log(status, method, url);
   res.statusCode = status;
-  res.headers = data?.headers as any;
+  res.headers = data?.headers || {};
   return { newres: res, data: lidarr };
 }
 
