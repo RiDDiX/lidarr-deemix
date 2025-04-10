@@ -1,18 +1,15 @@
+"""Redirect HTTP requests to another server."""
+
 from mitmproxy import http
 
+
 def request(flow: http.HTTPFlow) -> None:
-    # Debug-Ausgabe
-    print("Incoming request:", flow.request.pretty_host, flow.request.host, flow.request.port)
-    
-    # Sonderfall: Spotify nicht umleiten
+    # pretty_host takes the "Host" header of the request into account,
+    # which is useful in transparent mode where we usually only have the IP
+    # otherwise.
     if flow.request.pretty_host == "https://api.lidarr.audio/api/v0.4/spotify/":
-        return
-    
-    # Prüfe, ob der Request an "api.lidarr.audio", "ws.audioscrobbler.com" oder "localhost:3000" erfolgt.
-    if (flow.request.pretty_host in ["api.lidarr.audio", "ws.audioscrobbler.com"]) \
-       or (flow.request.host == "localhost" and flow.request.port == 3000) \
-       or ("localhost:3000" in flow.request.pretty_host):
-        print("Redirecting request from", flow.request.pretty_host)
+        pass
+    elif flow.request.pretty_host == "api.lidarr.audio" or flow.request.pretty_host == "ws.audioscrobbler.com":
         flow.request.headers["X-Proxy-Host"] = flow.request.pretty_host
         flow.request.scheme = "http"
         flow.request.host = "127.0.0.1"
