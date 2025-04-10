@@ -10,17 +10,17 @@ dotenv.config();
 
 const fastify = Fastify({ logger: { level: "error" } });
 
-// Standard-API-Endpoint (offizielle Lidarr-API)
+// Offizieller API-Endpoint (wird genutzt, falls keine spezielle Logik greift)
 const defaultLidarrApiUrl =
   process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 
-// Hilfsfunktion: Liefert den Request-Body nur, wenn die HTTP-Methode diesen zulässt (nicht GET/HEAD).
+// Liefert den Request-Body nur, wenn die HTTP-Methode diesen zulässt (nicht GET/HEAD)
 function getRequestBody(req: FastifyRequest): undefined | string {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
   return req.body ? req.body.toString() : undefined;
 }
 
-// Für GET /api/v0.4/search/artists: Ruft MusicBrainz ab und, falls nötig, den Deezer-Fallback.
+// Für GET /api/v0.4/search/artists: Ruft MusicBrainz ab; falls keine Ergebnisse, fallback auf Deezer (über deemixArtists)
 async function handleArtistSearch(req: FastifyRequest): Promise<any[]> {
   const u = new URL(`http://localhost${req.url}`);
   const query = u.searchParams.get("query") || "";
@@ -29,10 +29,8 @@ async function handleArtistSearch(req: FastifyRequest): Promise<any[]> {
     const mbResponse = await fetch(musicBrainzUrl);
     const mbJson = await mbResponse.json();
     if (mbJson && mbJson.artists && Array.isArray(mbJson.artists) && mbJson.artists.length > 0) {
-      // Liefert das Array der Künstler zurück
       return mbJson.artists;
     } else {
-      // Falls MusicBrainz keine Künstler liefert, fallback auf Deemix
       return await deemixArtists(query);
     }
   } catch (e: unknown) {
@@ -41,12 +39,13 @@ async function handleArtistSearch(req: FastifyRequest): Promise<any[]> {
   }
 }
 
-// Haupt-Proxy-Funktion: Leitet Anfragen anhand des URL-Pfads um.
+// Haupt-Proxy-Funktion: Leitet Anfragen je nach URL-Pfad um.
 async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
   const bodyValue = getRequestBody(req);
   const headers: { [key: string]: any } = {};
+
   Object.entries(req.headers).forEach(([key, value]) => {
     if (key !== "host" && key !== "connection") {
       headers[key] = value;
@@ -54,7 +53,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   });
   const urlPath = `${u.pathname}${u.search}`;
 
-  // 1. Künstler-Suche: Musikbrainz + Deezer-Fallback
+  // 1. Für Künstler-Suche
   if (u.pathname.startsWith("/api/v0.4/search/artists")) {
     const data = await handleArtistSearch(req);
     res.statusCode = 200;
@@ -80,7 +79,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // 3. Album-Anfragen (Beispiel: /api/v0.4/album/)
+  // 3. Für Album-Anfragen (Beispiel: "/api/v0.4/album/...")
   if (u.pathname.startsWith("/api/v0.4/album/")) {
     if (u.pathname.includes("-bbbb-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
@@ -92,13 +91,12 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // 4. Standard-Weiterleitung an den offiziellen API-Endpoint
+  // 4. Standard: Weiterleiten an den offiziellen API-Endpoint.
   const finalUrl = `${defaultLidarrApiUrl}${urlPath}`;
   try {
     const fetchOptions: any = { method, headers };
     if (bodyValue !== undefined) fetchOptions.body = bodyValue;
     const response = await fetch(finalUrl, fetchOptions);
-    // Falls der offizielle Endpoint fehlerhaft antwortet und FALLBACK_DEEZER aktiv ist, fallback auf Deezer.
     if (!response.ok && process.env.FALLBACK_DEEZER === "true") {
       console.error(`Fehler vom offiziellen API-Endpoint (Status: ${response.status}). Fallback auf Deezer.`);
       const query = u.searchParams.get("query") || "";
