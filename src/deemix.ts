@@ -6,7 +6,7 @@ import { getArtistData } from "./artistData.js";
 import { mergeAlbumLists } from "./helpers.js";
 import { getAllLidarrArtists } from "./lidarr.js";
 
-const deemixUrl = process.env.DEEMIX_URL || "http://localhost:3000";
+const deemixUrl = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
 
 /**
  * Erzeugt eine Fake-ID, die anhand des Typs einen Buchstaben-Prefix verwendet.
