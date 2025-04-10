@@ -2,7 +2,7 @@
 import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import dotenv from "dotenv";
-import { search, getArtist, getAlbum, deemixArtist } from "./deemix.js";
+import { getArtist, getAlbum, deemixArtist, deemixArtists } from "./deemix.js";
 import { removeKeys } from "./helpers.js";
 import { getArtistData } from "./artistData.js";
 
@@ -14,32 +14,34 @@ const fastify = Fastify({ logger: { level: "error" } });
 const defaultLidarrApiUrl =
   process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 
-// Hilfsfunktion: Liefert den Request-Body nur, wenn die HTTP-Methode diesen zulässt (nicht für GET/HEAD)
+// Hilfsfunktion: Liefert den Request-Body nur, wenn die HTTP-Methode diesen zulässt (nicht GET/HEAD).
 function getRequestBody(req: FastifyRequest): undefined | string {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
   return req.body ? req.body.toString() : undefined;
 }
 
-// Funktion für die Künstler-Suche über MusicBrainz mit Deezer-Fallback
-async function handleArtistSearch(req: FastifyRequest): Promise<any> {
+// Für GET /api/v0.4/search/artists: Ruft MusicBrainz ab und, falls nötig, den Deezer-Fallback.
+async function handleArtistSearch(req: FastifyRequest): Promise<any[]> {
   const u = new URL(`http://localhost${req.url}`);
   const query = u.searchParams.get("query") || "";
   const musicBrainzUrl = `https://musicbrainz.org/ws/2/artist/?query=${encodeURIComponent(query)}&fmt=json`;
   try {
     const mbResponse = await fetch(musicBrainzUrl);
     const mbJson = await mbResponse.json();
-    if (mbJson && mbJson.artists && mbJson.artists.length > 0) {
-      return mbJson;
+    if (mbJson && mbJson.artists && Array.isArray(mbJson.artists) && mbJson.artists.length > 0) {
+      // Liefert das Array der Künstler zurück
+      return mbJson.artists;
     } else {
-      return await deemixArtist(query);
+      // Falls MusicBrainz keine Künstler liefert, fallback auf Deemix
+      return await deemixArtists(query);
     }
   } catch (e: unknown) {
     console.error("Fehler bei MusicBrainz-Abruf:", e);
-    return await deemixArtist(query);
+    return await deemixArtists(query);
   }
 }
 
-// Haupt-Proxy-Funktion: Leitet Anfragen entsprechend um.
+// Haupt-Proxy-Funktion: Leitet Anfragen anhand des URL-Pfads um.
 async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
@@ -52,14 +54,14 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   });
   const urlPath = `${u.pathname}${u.search}`;
 
-  // 1. Künstler-Suche: MusicBrainz + Deezer-Fallback
+  // 1. Künstler-Suche: Musikbrainz + Deezer-Fallback
   if (u.pathname.startsWith("/api/v0.4/search/artists")) {
     const data = await handleArtistSearch(req);
     res.statusCode = 200;
     return data;
   }
 
-  // 2. Künstler-Details: Falls FALLBACK_DEEZER=true direkt Deezer, sonst MusicBrainz → ggf. fallback
+  // 2. Künstler-Details
   if (u.pathname.startsWith("/api/v0.4/artist/")) {
     const query = u.searchParams.get("query") || "";
     if (process.env.FALLBACK_DEEZER === "true") {
@@ -90,12 +92,13 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // 4. Standard: Weiterleiten an den offiziellen API-Endpoint
+  // 4. Standard-Weiterleitung an den offiziellen API-Endpoint
   const finalUrl = `${defaultLidarrApiUrl}${urlPath}`;
   try {
     const fetchOptions: any = { method, headers };
     if (bodyValue !== undefined) fetchOptions.body = bodyValue;
     const response = await fetch(finalUrl, fetchOptions);
+    // Falls der offizielle Endpoint fehlerhaft antwortet und FALLBACK_DEEZER aktiv ist, fallback auf Deezer.
     if (!response.ok && process.env.FALLBACK_DEEZER === "true") {
       console.error(`Fehler vom offiziellen API-Endpoint (Status: ${response.status}). Fallback auf Deezer.`);
       const query = u.searchParams.get("query") || "";
@@ -134,7 +137,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   }
 }
 
-// Alle GET-Anfragen abfangen
+// Alle GET-Anfragen abfangen.
 fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
   const data = await doProxy(req, res);
   return data;

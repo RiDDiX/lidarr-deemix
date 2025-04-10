@@ -9,7 +9,7 @@ import { getAllLidarrArtists } from "./lidarr.js";
 // Basis-URL für den Deemix-Server: Standardmäßig Port 7272 verwenden.
 const deemixUrl = process.env.DEEMIX_URL || "http://localhost:7272";
 
-// Erzeugt eine Fake-ID anhand des Typs.
+// Hilfsfunktion: Erzeugt eine Fake-ID anhand des Typs.
 export function fakeId(id: string | number, type: string): string {
   let p = "a";
   if (type === "album") p = "b";
@@ -20,14 +20,14 @@ export function fakeId(id: string | number, type: string): string {
   return `${"".padStart(8, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${idStr}`;
 }
 
-// Bestimmt den Typ anhand des record_type.
+// Hilfsfunktion: Bestimmt den Typ anhand des record_type.
 function getType(rc: string): string {
   let type = rc.charAt(0).toUpperCase() + rc.slice(1).toLowerCase();
   if (type === "Ep") type = "EP";
   return type;
 }
 
-// Ruft Künstler von Deemix ab.
+// Ruft Künstler von Deemix ab und liefert ein Array.
 export async function deemixArtists(name: string): Promise<any[]> {
   const res = await fetch(`${deemixUrl}/search/artists?limit=100&offset=0&q=${encodeURIComponent(name)}`);
   const jsonRaw: unknown = await res.json();
@@ -51,7 +51,7 @@ export async function deemixTracks(id: string): Promise<any[]> {
 }
 
 // Ruft einen einzelnen Künstler von Deemix ab.
-// Wenn der Parameter Ziffern enthält, wird er als ID genutzt, sonst als Name.
+// Wenn der Parameter Ziffern enthält, wird er als ID genutzt, ansonsten als Name.
 export async function deemixArtist(idOrName: string): Promise<any> {
   if (/\d/.test(idOrName)) {
     const res = await fetch(`${deemixUrl}/artists/${idOrName}`);
@@ -94,7 +94,9 @@ export async function deemixArtist(idOrName: string): Promise<any> {
   } else {
     const artists = await deemixArtists(idOrName);
     const artist = artists.find(
-      (a: any) => a["name"] === idOrName || normalize(a["name"]) === normalize(idOrName)
+      (a: any) =>
+        a["name"] === idOrName ||
+        normalize(a["name"]) === normalize(idOrName)
     );
     return artist ? artist : null;
   }
@@ -102,7 +104,7 @@ export async function deemixArtist(idOrName: string): Promise<any> {
 
 // Ruft Alben von Deemix ab.
 export async function deemixAlbums(name: string): Promise<any[]> {
-  // Zuerst ermitteln wir die Gesamtanzahl
+  // Gesamtergebnis ermitteln: Zuerst den Gesamtwert "total" abrufen
   const res = await fetch(`${deemixUrl}/search/albums?limit=1&offset=0&q=${encodeURIComponent(name)}`);
   const json = await res.json();
   const total = json["total"] as number;
@@ -131,7 +133,7 @@ export function deduplicateAlbums(albums: any[]): any[] {
   return deduped;
 }
 
-// Ruft ein Album samt Tracks und verknüpften Künstlern ab.
+// Ruft ein Album samt Tracks und zugehörigen Künstlern ab.
 export async function getAlbum(id: string): Promise<any> {
   const d = await deemixAlbum(id);
   const contributors = d["contributors"].map((c: any) => ({
