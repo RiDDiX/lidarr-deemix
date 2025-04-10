@@ -9,7 +9,7 @@ export function titleCase(str: string): string {
   return str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
 }
 
-// Fügt zwei Albumlisten zusammen und vermeidet Duplikate.
+// Fügt zwei Albumlisten zusammen, vermeidet Duplikate.
 export function mergeAlbumLists(list1: any[], list2: any[]): any[] {
   const combined = [...list1];
   for (const album of list2) {
@@ -31,7 +31,7 @@ export function deduplicateAlbums(albums: any[]): any[] {
   return deduped;
 }
 
-// Entfernt aus einem Objekt bestimmte Schlüssel (single key oder Array von keys).
+// Entfernt aus einem Objekt bestimmte Schlüssel (als string oder string[]).
 export function removeKeys(obj: any, keys: string | string[]): any {
   const keysArray = Array.isArray(keys) ? keys : [keys];
   const newObj: any = {};
