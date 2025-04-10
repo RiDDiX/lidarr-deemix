@@ -10,10 +10,10 @@ dotenv.config();
 
 const fastify = Fastify({ logger: { level: "error" } });
 
-// Wird im Standardfall genutzt, falls keine spezielle Logik greift.
+// Standard-API-Endpoint (falls keine spezielle Logik greift)
 const defaultLidarrApiUrl = process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 
-// Hilfsfunktion: Gibt den Body nur zurück, wenn die HTTP-Methode diesen auch zulässt (also nicht für GET/HEAD).
+// Hilfsfunktion: Gibt den Request-Body nur zurück, wenn die HTTP-Methode einen Body zulässt (also nicht GET/HEAD).
 function getRequestBody(req: FastifyRequest): undefined | string {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
   return req.body ? req.body.toString() : undefined;
@@ -23,29 +23,24 @@ function getRequestBody(req: FastifyRequest): undefined | string {
 async function handleArtistSearch(req: FastifyRequest): Promise<any> {
   const u = new URL(`http://localhost${req.url}`);
   const query = u.searchParams.get("query") || "";
-  
-  // Baue die URL für MusicBrainz:
-  // Musikbrainz Artist Search API: https://musicbrainz.org/ws/2/artist/?query=<query>&fmt=json
+  // MusicBrainz Artist Search API
   const musicBrainzUrl = `https://musicbrainz.org/ws/2/artist/?query=${encodeURIComponent(query)}&fmt=json`;
-
   try {
     const mbResponse = await fetch(musicBrainzUrl);
     const mbJson = await mbResponse.json();
-    // Falls Künstlerdaten vorhanden sind, geben wir diese zurück.
     if (mbJson && mbJson.artists && mbJson.artists.length > 0) {
       return mbJson;
     } else {
-      // Keine Daten in MusicBrainz – Fall back zu Deezer.
+      // Kein Ergebnis von MusicBrainz – Deezer-Fallback
       return await deemixArtist(query);
     }
-  } catch (e) {
+  } catch (e: unknown) {
     console.error("Fehler bei MusicBrainz-Abruf:", e);
-    // Im Fehlerfall ebenfalls den Deezer-Fallback nehmen.
     return await deemixArtist(query);
   }
 }
 
-// Haupt-Proxy-Funktion: Leitet die Anfragen entsprechend um.
+// Haupt-Proxy-Funktion: Leitet Anfragen gemäß Pfad um.
 async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
@@ -61,14 +56,14 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
 
   const urlPath = `${u.pathname}${u.search}`;
 
-  // Für die Künstler-Suche: Verwende MusicBrainz mit Deezer-Fallback
+  // Künstler-Suche (Search Artists)
   if (u.pathname.startsWith("/api/v0.4/search/artists")) {
     const data = await handleArtistSearch(req);
     res.statusCode = 200;
     return data;
   }
 
-  // Für Künstler-Details: Zuerst MusicBrainz, ansonsten Deezer
+  // Künstler-Details: Zuerst MusicBrainz, ansonsten Deezer
   if (u.pathname.startsWith("/api/v0.4/artist/")) {
     const query = u.searchParams.get("query") || "";
     const mbData = await getArtistData(query);
@@ -82,7 +77,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // Für Album-Anfragen: Beispielweise nur den offiziellen API-Server nutzen
+  // Album-Anfragen: Beispiel für /api/v0.4/album/
   if (u.pathname.startsWith("/api/v0.4/album/")) {
     if (u.pathname.includes("-bbbb-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
@@ -94,24 +89,26 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // Standard: Weiterleiten an den offiziellen API-Endpoint (falls benötigt)
+  // Standard: Weiterleiten an den offiziellen API-Endpoint
   const finalUrl = `${defaultLidarrApiUrl}${urlPath}`;
   try {
     const fetchOptions: any = { method, headers };
-    if (bodyValue !== undefined) fetchOptions.body = bodyValue;
+    if (bodyValue !== undefined) {
+      fetchOptions.body = bodyValue;
+    }
     const response = await fetch(finalUrl, fetchOptions);
     res.statusCode = response.status;
     const json = await response.json();
     return json;
-  } catch (e) {
+  } catch (e: unknown) {
     console.error("Fehler beim Abruf vom offiziellen API-Endpoint:", e);
     res.statusCode = 500;
-    return { error: "Internal Server Error", message: e.message };
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    return { error: "Internal Server Error", message: errorMsg };
   }
 }
 
-// Fastify-Route: Hier werden alle GET-Anfragen abgefangen.
-// Für weitere Methoden kannst du ähnlich vorgehen.
+// Route: Fängt alle GET-Anfragen ab (für weitere HTTP-Methoden kannst du analog vorgehen)
 fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
   const data = await doProxy(req, res);
   return data;
