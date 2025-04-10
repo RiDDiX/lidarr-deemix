@@ -1,7 +1,6 @@
 // index.ts
 import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
-import _ from "lodash";
 import dotenv from "dotenv";
 import { search, getArtist, getAlbum, deemixArtist } from "./deemix.js";
 import { removeKeys } from "./helpers.js";
@@ -9,146 +8,112 @@ import { getArtistData } from "./artistData.js";
 
 dotenv.config();
 
-const lidarrApiUrl = "https://api.lidarr.audio";
-const scrobblerApiUrl = "https://ws.audioscrobbler.com";
+const fastify = Fastify({ logger: { level: "error" } });
 
-const fastify = Fastify({
-  logger: { level: "error" },
-});
+// Wird im Standardfall genutzt, falls keine spezielle Logik greift.
+const defaultLidarrApiUrl = process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 
-// Zentraler Fehler-Handler
-fastify.setErrorHandler((error, request, reply) => {
-  console.error("Error:", error);
-  reply.status(500).send({ error: "Internal Server Error", message: error.message });
-});
-
-// Hilfsfunktion: Liefert den Body nur, wenn die Methode das erlaubt
+// Hilfsfunktion: Gibt den Body nur zurück, wenn die HTTP-Methode diesen auch zulässt (also nicht für GET/HEAD).
 function getRequestBody(req: FastifyRequest): undefined | string {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
   return req.body ? req.body.toString() : undefined;
 }
 
-async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
-  const headers = req.headers;
+// Funktion für die Künstler-Suche über MusicBrainz mit Deezer-Fallback
+async function handleArtistSearch(req: FastifyRequest): Promise<any> {
   const u = new URL(`http://localhost${req.url}`);
-  const method = req.method;
-  const bodyValue = getRequestBody(req);
-  let status = 200;
-  const nh: { [key: string]: any } = {};
-  // Kopiere alle Header außer "host" und "connection"
-  Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") nh[key] = value;
-  });
-  const url = `${u.pathname}${u.search}`;
-  let data;
-  try {
-    const fetchOptions: any = { method, headers: nh };
-    if (bodyValue !== undefined) {
-      fetchOptions.body = bodyValue;
-    }
-    data = await fetch(`${scrobblerApiUrl}${url}`, fetchOptions);
-    status = data.status;
-  } catch (e) {
-    console.error(e);
-  }
-  res.statusCode = status;
-  // Setze die empfangenen Headers mittels res.header() statt direkter Zuweisung
-  if (data && data.headers && typeof data.headers.forEach === "function") {
-    data.headers.forEach((value, key) => {
-      res.header(key, value);
-    });
-  }
-  let json;
-  try {
-    json = await data?.json();
-  } catch (e) {
-    console.error("Fehler beim Parsen des JSON", e);
-    json = {};
-  }
-  if (process.env.OVERRIDE_MB === "true") {
-    json = removeKeys(json, ["mbid"]);
-  }
-  return { newres: res, data: json };
-}
+  const query = u.searchParams.get("query") || "";
+  
+  // Baue die URL für MusicBrainz:
+  // Musikbrainz Artist Search API: https://musicbrainz.org/ws/2/artist/?query=<query>&fmt=json
+  const musicBrainzUrl = `https://musicbrainz.org/ws/2/artist/?query=${encodeURIComponent(query)}&fmt=json`;
 
-async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
-  const headers = req.headers;
-  const u = new URL(`http://localhost${req.url}`);
-  const method = req.method;
-  const bodyValue = getRequestBody(req);
-  let status = 200;
-  const nh: { [key: string]: any } = {};
-  // Kopiere alle Header außer "host" und "connection"
-  Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") nh[key] = value;
-  });
-  const url = `${u.pathname}${u.search}`;
-  let data;
   try {
-    const fetchOptions: any = { method, headers: nh };
-    if (bodyValue !== undefined) {
-      fetchOptions.body = bodyValue;
-    }
-    data = await fetch(`${lidarrApiUrl}${url}`, fetchOptions);
-    status = data.status;
-  } catch (e) {
-    console.error(e);
-  }
-  let lidarr: any;
-  try {
-    lidarr = await data?.json();
-  } catch (e) {
-    console.error(e);
-  }
-  if (url.includes("/v0.4/search")) {
-    const queryParam = u.searchParams.get("query") || "";
-    lidarr = await search(lidarr, queryParam, url.includes("type=all"));
-  }
-  if (url.includes("/v0.4/artist/")) {
-    // Zuerst MusicBrainz-Daten abrufen
-    const queryParam = u.searchParams.get("query") || "";
-    const mbArtist = await getArtistData(queryParam);
-    if (mbArtist && mbArtist.Albums && mbArtist.Albums.length > 0) {
-      lidarr = mbArtist;
+    const mbResponse = await fetch(musicBrainzUrl);
+    const mbJson = await mbResponse.json();
+    // Falls Künstlerdaten vorhanden sind, geben wir diese zurück.
+    if (mbJson && mbJson.artists && mbJson.artists.length > 0) {
+      return mbJson;
     } else {
-      if (url.includes("-aaaa-")) {
-        let id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
-        if (id) {
-          lidarr = await deemixArtist(id);
-          status = lidarr === null ? 404 : 200;
-        }
-      } else {
-        lidarr = await deemixArtist(queryParam);
-      }
+      // Keine Daten in MusicBrainz – Fall back zu Deezer.
+      return await deemixArtist(query);
     }
+  } catch (e) {
+    console.error("Fehler bei MusicBrainz-Abruf:", e);
+    // Im Fehlerfall ebenfalls den Deezer-Fallback nehmen.
+    return await deemixArtist(query);
   }
-  if (url.includes("/v0.4/album/")) {
-    if (url.includes("-bbbb-")) {
-      let id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
-      if (id) {
-        lidarr = await getAlbum(id);
-        status = lidarr === null ? 404 : 200;
-      }
-    }
-  }
-  if (data && data.headers && typeof data.headers.forEach === "function") {
-    data.headers.forEach((value, key) => {
-      res.header(key, value);
-    });
-  }
-  console.log(status, method, url);
-  res.statusCode = status;
-  return { newres: res, data: lidarr };
 }
 
-fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
-  const headers = req.headers;
-  const host = headers["x-proxy-host"];
-  if (host === "ws.audioscrobbler.com") {
-    const { newres, data } = await doScrobbler(req, res);
+// Haupt-Proxy-Funktion: Leitet die Anfragen entsprechend um.
+async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
+  const u = new URL(`http://localhost${req.url}`);
+  const method = req.method;
+  const bodyValue = getRequestBody(req);
+  const headers: { [key: string]: any } = {};
+
+  // Kopiere alle Header außer "host" und "connection"
+  Object.entries(req.headers).forEach(([key, value]) => {
+    if (key !== "host" && key !== "connection") {
+      headers[key] = value;
+    }
+  });
+
+  const urlPath = `${u.pathname}${u.search}`;
+
+  // Für die Künstler-Suche: Verwende MusicBrainz mit Deezer-Fallback
+  if (u.pathname.startsWith("/api/v0.4/search/artists")) {
+    const data = await handleArtistSearch(req);
+    res.statusCode = 200;
     return data;
   }
-  const { newres, data } = await doApi(req, res);
+
+  // Für Künstler-Details: Zuerst MusicBrainz, ansonsten Deezer
+  if (u.pathname.startsWith("/api/v0.4/artist/")) {
+    const query = u.searchParams.get("query") || "";
+    const mbData = await getArtistData(query);
+    if (mbData && mbData.Albums && mbData.Albums.length > 0) {
+      res.statusCode = 200;
+      return mbData;
+    } else {
+      const fallback = await deemixArtist(query);
+      res.statusCode = fallback ? 200 : 404;
+      return fallback;
+    }
+  }
+
+  // Für Album-Anfragen: Beispielweise nur den offiziellen API-Server nutzen
+  if (u.pathname.startsWith("/api/v0.4/album/")) {
+    if (u.pathname.includes("-bbbb-")) {
+      let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
+      if (id) {
+        const albumData = await getAlbum(id);
+        res.statusCode = albumData ? 200 : 404;
+        return albumData;
+      }
+    }
+  }
+
+  // Standard: Weiterleiten an den offiziellen API-Endpoint (falls benötigt)
+  const finalUrl = `${defaultLidarrApiUrl}${urlPath}`;
+  try {
+    const fetchOptions: any = { method, headers };
+    if (bodyValue !== undefined) fetchOptions.body = bodyValue;
+    const response = await fetch(finalUrl, fetchOptions);
+    res.statusCode = response.status;
+    const json = await response.json();
+    return json;
+  } catch (e) {
+    console.error("Fehler beim Abruf vom offiziellen API-Endpoint:", e);
+    res.statusCode = 500;
+    return { error: "Internal Server Error", message: e.message };
+  }
+}
+
+// Fastify-Route: Hier werden alle GET-Anfragen abgefangen.
+// Für weitere Methoden kannst du ähnlich vorgehen.
+fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
+  const data = await doProxy(req, res);
   return data;
 });
 
@@ -157,8 +122,8 @@ fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
     console.error(err);
     process.exit(1);
   }
-  console.log("Lidarr++Deemix running at " + address);
+  console.log("Lidarr++Deemix Proxy running at " + address);
   if (process.env.OVERRIDE_MB === "true") {
-    console.log("Overriding MusicBrainz API with Deemix API");
+    console.log("Overriding MusicBrainz API with Deezer fallback");
   }
 });
