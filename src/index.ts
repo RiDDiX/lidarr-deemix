@@ -10,21 +10,21 @@ dotenv.config();
 
 const fastify = Fastify({ logger: { level: "error" } });
 
-// Offizieller API-Endpoint (wird genutzt, falls FALLBACK_DEEZER nicht aktiv ist)
+// Offizieller API-Endpoint – wird genutzt, falls FALLBACK_DEEZER nicht aktiv ist.
 const defaultLidarrApiUrl =
   process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 
-// Liefert den Request-Body nur, wenn die HTTP-Methode diesen zulässt (also nicht GET/HEAD)
+// Liefert den Request-Body nur, wenn die Methode ihn zulässt.
 function getRequestBody(req: FastifyRequest): undefined | string {
   return (req.method === "GET" || req.method === "HEAD") ? undefined : req.body ? req.body.toString() : undefined;
 }
 
-// Für GET /api/v0.4/search/artists: Falls FALLBACK_DEEZER aktiv ist, nutzen wir direkt den Deezer-Fallback (deemixArtists),
-// sonst wird MusicBrainz abgefragt und bei Bedarf der Deezer-Fallback verwendet.
+// Für GET /api/v0.4/search/artists: Musikbrainz-Abfrage, ggf. Fallback auf Deezer.
 async function handleArtistSearch(req: FastifyRequest): Promise<any[]> {
   const u = new URL(`http://localhost${req.url}`);
   const query = u.searchParams.get("query") || "";
   if (process.env.FALLBACK_DEEZER === "true") {
+    // Direkt über Deezer/Deemix suchen
     return await deemixArtists(query);
   }
   const musicBrainzUrl = `https://musicbrainz.org/ws/2/artist/?query=${encodeURIComponent(query)}&fmt=json`;
@@ -42,7 +42,7 @@ async function handleArtistSearch(req: FastifyRequest): Promise<any[]> {
   }
 }
 
-// Haupt-Proxy-Funktion: Leitet Anfragen anhand des URL-Pfads um.
+// Haupt-Proxy-Funktion: Leitet Anfragen anhand des Pfads um.
 async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
@@ -79,7 +79,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // 3. Album-Anfragen (Beispiel: "/api/v0.4/album/...")
+  // 3. Album-Anfragen (Beispiel: /api/v0.4/album/...)
   if (u.pathname.startsWith("/api/v0.4/album/")) {
     if (u.pathname.includes("-bbbb-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
@@ -90,8 +90,8 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
       }
     }
   }
-
-  // 4. Standard: Falls FALLBACK_DEEZER aktiv, nicht den offiziellen API-Endpunkt abfragen.
+  
+  // 4. Wenn FALLBACK_DEEZER true ist, greifen wir komplett auf den Deezer-Fallback.
   if (process.env.FALLBACK_DEEZER === "true") {
     const query = u.searchParams.get("query") || "";
     const fallback = await deemixArtist(query);
@@ -143,7 +143,6 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   }
 }
 
-// Alle GET-Anfragen abfangen.
 fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
   return await doProxy(req, res);
 });

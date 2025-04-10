@@ -3,7 +3,7 @@ import fetch from "node-fetch";
 import _ from "lodash";
 import { normalize, titleCase, mergeAlbumLists, deduplicateAlbums } from "./helpers.js";
 import { getAllLidarrArtists } from "./lidarr.js";
-import { getArtistData } from "./artistData.js"; // Falls benötigt
+import { getArtistData } from "./artistData.js"; // Falls genutzt
 
 // Basis-URL für den Deemix-Server: Standardmäßig Port 7272
 const deemixUrl = process.env.DEEMIX_URL || "http://localhost:7272";
@@ -50,7 +50,7 @@ export async function deemixTracks(id: string): Promise<any[]> {
 }
 
 // Ruft einen einzelnen Künstler von Deemix ab.
-// Wenn idOrName Ziffern enthält, wird er als ID genutzt, ansonsten wird anhand des Namens gesucht.
+// Wenn idOrName Ziffern enthält, wird er als ID genutzt, ansonsten anhand des Namens.
 export async function deemixArtist(idOrName: string): Promise<any> {
   if (/\d/.test(idOrName)) {
     const res = await fetch(`${deemixUrl}/artists/${idOrName}`);
@@ -64,7 +64,6 @@ export async function deemixArtist(idOrName: string): Promise<any> {
     if (!contentType || !contentType.includes("application/json")) {
       const text = await res.text();
       console.error("Deemix API returned non-JSON response:", text);
-      // Rückgabe eines validen JSON-Fehlerobjekts
       return { error: "Deemix API error", message: "Invalid JSON response", raw: text };
     }
     const j = await res.json();
@@ -362,7 +361,7 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
   return lidarr;
 }
 
-// Holt den finalen Künstler-Datensatz. Priorität: MusicBrainz (getArtistData) > Deezer/Deemix.
+// Holt den finalen Künstler-Datensatz (Priorität: MusicBrainz > Deezer/Deemix).
 export async function getArtist(lidarr: any): Promise<any> {
   if (lidarr["error"]) return lidarr;
   const mbArtist = await getArtistData(lidarr["artistname"]);

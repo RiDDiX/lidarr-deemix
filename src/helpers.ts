@@ -31,7 +31,7 @@ export function deduplicateAlbums(albums: any[]): any[] {
   return deduped;
 }
 
-// Entfernt aus einem Objekt bestimmte Schlüssel (als string oder string[]).
+// Entfernt aus einem Objekt bestimmte Schlüssel (als string oder Array).
 export function removeKeys(obj: any, keys: string | string[]): any {
   const keysArray = Array.isArray(keys) ? keys : [keys];
   const newObj: any = {};
