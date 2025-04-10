@@ -15,7 +15,7 @@ const fastify = Fastify({ logger: { level: "error" } });
 const defaultLidarrApiUrl =
   process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 
-// Hilfsfunktion: Liefert den Request-Body nur, wenn die HTTP-Methode diesen auch zulässt (also nicht GET/HEAD).
+// Hilfsfunktion: Gibt den Request-Body nur zurück, wenn die HTTP-Methode diesen auch zulässt (also nicht für GET/HEAD).
 function getRequestBody(req: FastifyRequest): undefined | string {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
   return req.body ? req.body.toString() : undefined;
@@ -25,7 +25,7 @@ function getRequestBody(req: FastifyRequest): undefined | string {
 async function handleArtistSearch(req: FastifyRequest): Promise<any> {
   const u = new URL(`http://localhost${req.url}`);
   const query = u.searchParams.get("query") || "";
-  // MusicBrainz Artist Search API (JSON-Format)
+  // MusicBrainz Artist Search API: JSON-Format erzwingen
   const musicBrainzUrl = `https://musicbrainz.org/ws/2/artist/?query=${encodeURIComponent(query)}&fmt=json`;
   try {
     const mbResponse = await fetch(musicBrainzUrl);
@@ -33,7 +33,7 @@ async function handleArtistSearch(req: FastifyRequest): Promise<any> {
     if (mbJson && mbJson.artists && mbJson.artists.length > 0) {
       return mbJson;
     } else {
-      // Keine Ergebnisse von MusicBrainz → Deezer-Fallback
+      // Keine Ergebnisse von MusicBrainz – Deezer-Fallback
       return await deemixArtist(query);
     }
   } catch (e: unknown) {
@@ -42,19 +42,17 @@ async function handleArtistSearch(req: FastifyRequest): Promise<any> {
   }
 }
 
-// Haupt-Proxy-Funktion: Leitet Anfragen gemäß URL-Pfad um.
+// Haupt-Proxy-Funktion: Leitet Anfragen je nach URL-Pfad um.
 async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
   const bodyValue = getRequestBody(req);
   const headers: { [key: string]: any } = {};
-  // Kopiere alle Header (ohne host und connection)
   Object.entries(req.headers).forEach(([key, value]) => {
     if (key !== "host" && key !== "connection") {
       headers[key] = value;
     }
   });
-
   const urlPath = `${u.pathname}${u.search}`;
 
   // 1. Künstler-Suche: MusicBrainz + Deezer-Fallback
@@ -64,7 +62,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     return data;
   }
 
-  // 2. Künstler-Details: Falls FALLBACK_DEEZER aktiv, direkt Deezer nutzen; sonst Musikbrainz zuerst, falls keine Daten → Deezer
+  // 2. Künstler-Details: Falls FALLBACK_DEEZER=true, direkt Deezer verwenden; sonst: zuerst MusicBrainz, dann Deezer-Fallback.
   if (u.pathname.startsWith("/api/v0.4/artist/")) {
     const query = u.searchParams.get("query") || "";
     if (process.env.FALLBACK_DEEZER === "true") {
@@ -83,7 +81,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // 3. Album-Anfragen (Beispiel): Hier kannst du weitere Logik einbauen, falls benötigt.
+  // 3. Album-Anfragen: Beispiel für "/api/v0.4/album/"
   if (u.pathname.startsWith("/api/v0.4/album/")) {
     if (u.pathname.includes("-bbbb-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
@@ -101,7 +99,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     const fetchOptions: any = { method, headers };
     if (bodyValue !== undefined) fetchOptions.body = bodyValue;
     const response = await fetch(finalUrl, fetchOptions);
-    // Falls der offizielle Endpoint fehlerhaft antwortet und FALLBACK_DEEZER aktiv ist → Deezer-Fallback
+    // Wenn der offizielle Endpoint fehlerhaft antwortet und FALLBACK_DEEZER aktiviert ist → Deezer-Fallback
     if (!response.ok && process.env.FALLBACK_DEEZER === "true") {
       console.error(`Fehler vom offiziellen API-Endpoint (Status: ${response.status}). Fallback auf Deezer.`);
       const query = u.searchParams.get("query") || "";
@@ -140,7 +138,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   }
 }
 
-// Fastify-Route: Alle GET-Anfragen abfangen.
+// Alle GET-Anfragen abfangen.
 fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
   const data = await doProxy(req, res);
   return data;
