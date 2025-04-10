@@ -10,17 +10,17 @@ dotenv.config();
 
 const fastify = Fastify({ logger: { level: "error" } });
 
-// Offizieller API-Endpoint (wird genutzt, falls keine spezielle Logik greift)
+// Offizieller API-Endpoint (falls keine spezielle Logik greift)
 const defaultLidarrApiUrl =
   process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 
-// Liefert den Request-Body nur, wenn die HTTP-Methode diesen zulässt (nicht GET/HEAD)
+// Liefert den Request-Body nur, wenn die HTTP-Methode diesen zulässt (also nicht bei GET/HEAD)
 function getRequestBody(req: FastifyRequest): undefined | string {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
   return req.body ? req.body.toString() : undefined;
 }
 
-// Für GET /api/v0.4/search/artists: Ruft MusicBrainz ab; falls keine Ergebnisse, fallback auf Deezer (über deemixArtists)
+// Für GET /api/v0.4/search/artists: Ruft MusicBrainz ab; falls keine Ergebnisse, Fallback über Deezer (deemixArtists)
 async function handleArtistSearch(req: FastifyRequest): Promise<any[]> {
   const u = new URL(`http://localhost${req.url}`);
   const query = u.searchParams.get("query") || "";
@@ -45,15 +45,12 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   const method = req.method;
   const bodyValue = getRequestBody(req);
   const headers: { [key: string]: any } = {};
-
   Object.entries(req.headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") {
-      headers[key] = value;
-    }
+    if (key !== "host" && key !== "connection") headers[key] = value;
   });
   const urlPath = `${u.pathname}${u.search}`;
 
-  // 1. Für Künstler-Suche
+  // 1. Künstler-Suche: MusicBrainz + Deezer-Fallback
   if (u.pathname.startsWith("/api/v0.4/search/artists")) {
     const data = await handleArtistSearch(req);
     res.statusCode = 200;
@@ -79,7 +76,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // 3. Für Album-Anfragen (Beispiel: "/api/v0.4/album/...")
+  // 3. Album-Anfragen (Beispiel: "/api/v0.4/album/...")
   if (u.pathname.startsWith("/api/v0.4/album/")) {
     if (u.pathname.includes("-bbbb-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
