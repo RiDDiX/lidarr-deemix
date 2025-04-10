@@ -10,8 +10,7 @@ dotenv.config();
 
 const fastify = Fastify({ logger: { level: "error" } });
 
-// Standard-API-Endpoint (offizielle Lidarr-API)
-// Wird genutzt, falls keine spezielle Logik greift.
+// Standard-API-Endpoint (offizielle Lidarr-API, falls nicht anders konfiguriert)
 const defaultLidarrApiUrl =
   process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 
@@ -62,7 +61,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     return data;
   }
 
-  // 2. Künstler-Details: Falls FALLBACK_DEEZER=true, direkt Deezer verwenden; sonst: zuerst MusicBrainz, dann Deezer-Fallback.
+  // 2. Künstler-Details: Bei FALLBACK_DEEZER direkt Deezer nutzen, ansonsten zunächst MusicBrainz
   if (u.pathname.startsWith("/api/v0.4/artist/")) {
     const query = u.searchParams.get("query") || "";
     if (process.env.FALLBACK_DEEZER === "true") {
@@ -81,7 +80,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // 3. Album-Anfragen: Beispiel für "/api/v0.4/album/"
+  // 3. Album-Anfragen: Beispielhaft für "/api/v0.4/album/"
   if (u.pathname.startsWith("/api/v0.4/album/")) {
     if (u.pathname.includes("-bbbb-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
@@ -93,13 +92,14 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // 4. Standard: Weiterleiten an den offiziellen API-Endpoint
+  // 4. Standard: Weiterleiten an den offiziellen API-Endpoint.
   const finalUrl = `${defaultLidarrApiUrl}${urlPath}`;
   try {
     const fetchOptions: any = { method, headers };
     if (bodyValue !== undefined) fetchOptions.body = bodyValue;
     const response = await fetch(finalUrl, fetchOptions);
-    // Wenn der offizielle Endpoint fehlerhaft antwortet und FALLBACK_DEEZER aktiviert ist → Deezer-Fallback
+
+    // Falls der offizielle Endpoint fehlerhaft antwortet und FALLBACK_DEEZER aktiv ist → Deezer-Fallback.
     if (!response.ok && process.env.FALLBACK_DEEZER === "true") {
       console.error(`Fehler vom offiziellen API-Endpoint (Status: ${response.status}). Fallback auf Deezer.`);
       const query = u.searchParams.get("query") || "";
@@ -138,7 +138,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   }
 }
 
-// Alle GET-Anfragen abfangen.
+// Fängt alle GET-Anfragen ab.
 fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
   const data = await doProxy(req, res);
   return data;
