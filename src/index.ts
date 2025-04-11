@@ -1,4 +1,3 @@
-// index.ts
 import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import dotenv from "dotenv";
@@ -69,7 +68,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
       return fallback;
     }
     const mbData = await getArtistData(query);
-    if (mbData && mbData.Albums && mbData.Albums.length > 0) {
+    if (mbData && mbData.albums && mbData.albums.length > 0) {
       res.statusCode = 200;
       return mbData;
     } else {

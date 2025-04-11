@@ -1,4 +1,3 @@
-// deemix.ts (bereinigt & korrigiert)
 import fetch from "node-fetch";
 import _ from "lodash";
 import { normalize, titleCase, mergeAlbumLists } from "./helpers.js";
@@ -9,6 +8,7 @@ import { getArtistData } from "./artistData.js";
 function deduplicateAlbums(albums: any[]): any[] {
   const deduped: any[] = [];
   for (const album of albums) {
+    // Verwende hier "Title" aus den DTOs, falls diese so erstellt werden.
     if (!deduped.some(a => normalize(a.Title) === normalize(album.Title))) {
       deduped.push(album);
     }
@@ -123,8 +123,8 @@ export async function getArtist(lidarr: any): Promise<any> {
   if (lidarr["error"]) return lidarr;
   const mbArtist = await getArtistData(lidarr["artistname"]);
   if (mbArtist && mbArtist.albums && mbArtist.albums.length > 0) {
-    const deemixAlbums = await getAlbums(lidarr["artistname"]);
-    mbArtist.albums = mergeAlbumLists(mbArtist.albums, deemixAlbums);
+    const deemixAlbumsResult = await getAlbums(lidarr["artistname"]);
+    mbArtist.albums = mergeAlbumLists(mbArtist.albums, deemixAlbumsResult);
     if (!mbArtist.images || mbArtist.images.length === 0) {
       const dArtist = await deemixArtist(lidarr["artistname"]);
       if (dArtist && dArtist.images && dArtist.images.length > 0) {
@@ -136,3 +136,6 @@ export async function getArtist(lidarr: any): Promise<any> {
     return await deemixArtist(lidarr["artistname"]);
   }
 }
+
+// Exportiere getAlbum als Alias für deemixAlbum, damit index.ts darauf zugreifen kann.
+export const getAlbum = deemixAlbum;
