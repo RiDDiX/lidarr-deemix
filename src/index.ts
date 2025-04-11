@@ -16,17 +16,9 @@ dotenv.config();
 const fastify = Fastify({ logger: { level: "error" } });
 
 // Unsere Ziel-API-URLs:
-// Für API-Version v0.4: Standardmäßig wird "/api/v0.4" verwendet,
-// für API-Version v1: Standardmäßig wird "/api/v1" verwendet.
 const defaultLidarrApiUrlV04 = process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 const defaultLidarrApiUrlV1 = process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v1";
 const scrobblerApiUrl = "https://ws.audioscrobbler.com";
-
-// Minimale Implementierung von search, falls benötigt.
-// Hier wird einfach das übergebene lidarr-Objekt zurückgegeben.
-async function search(lidarr: any, query: string, isAll: boolean): Promise<any> {
-  return lidarr;
-}
 
 // Hilfsfunktion: Entferne den Version-Präfix vom eingehenden Pfad.
 function rewriteUrl(u: URL): { path: string; version: string } {
@@ -52,7 +44,7 @@ function getRequestBody(req: FastifyRequest): undefined | string {
     : undefined;
 }
 
-// doScrobbler: Behandelt Anfragen, die an den Scrobbler-Endpoint (Last.fm) gehen.
+// doScrobbler: Handhabt Anfragen an den Scrobbler-Endpoint (Last.fm).
 async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
@@ -67,18 +59,14 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
   const url = `${u.pathname}${u.search}`;
   let data: any;
   try {
-    data = await fetch(`${scrobblerApiUrl}${url}`, {
-      method: method,
-      body: body,
-      headers: nh,
-    });
+    data = await fetch(`${scrobblerApiUrl}${url}`, { method, body, headers: nh });
   } catch (e) {
     console.error("Error in doScrobbler fetch:", e);
     res.statusCode = 500;
     return { newres: res, data: { error: "Scrobbler fetch error" } };
   }
   res.statusCode = data.status;
-  // Header-Übernahme: Iteriere über die Response-Header und setze sie im Fastify-Reply
+  // Setze die Response-Header im Fastify-Reply
   data.headers.forEach((value: string, key: string) => {
     res.header(key, value);
   });
@@ -89,7 +77,7 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
   return { newres: res, data: json };
 }
 
-// doApi: Behandelt Anfragen an den Lidarr-API-Endpoint.
+// doApi: Handhabt Anfragen an die Lidarr-API.
 async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
@@ -102,9 +90,8 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     }
   });
   
-  // Schreibe den URL um: Entferne "/api/v0.4" oder "/api/v1" vom Anfang.
+  // Umschreiben des Pfads: Entferne /api/v0.4 oder /api/v1
   const { path, version } = rewriteUrl(u);
-  // Wähle die Zielbasis-URL basierend auf der API-Version.
   const targetApiUrl = version === "/api/v1" ? defaultLidarrApiUrlV1 : defaultLidarrApiUrlV04;
   const finalUrl = `${targetApiUrl}${path}`;
   
@@ -113,6 +100,12 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     const fetchOptions: any = { method, headers: nh };
     if (bodyValue !== undefined) fetchOptions.body = bodyValue;
     response = await fetch(finalUrl, fetchOptions);
+    
+    // Falls sowohl Transfer-Encoding als auch Content-Length gesetzt sind, entferne Transfer-Encoding.
+    if (response.headers.get("transfer-encoding") && response.headers.get("content-length")) {
+      console.warn("Response has both Transfer-Encoding and Content-Length. Removing Transfer-Encoding.");
+      response.headers.delete("transfer-encoding");
+    }
   } catch (e: unknown) {
     console.error("Error fetching from official API:", e);
     res.statusCode = 500;
@@ -153,7 +146,6 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     }
   }
   
-  // Header-Übernahme: Iteriere über die offiziellen Response-Header und setze sie in FastifyReply.
   if (response.headers && response.headers.forEach) {
     response.headers.forEach((value: string, key: string) => {
       res.header(key, value);
