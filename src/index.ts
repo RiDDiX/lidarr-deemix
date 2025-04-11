@@ -16,9 +16,7 @@ dotenv.config();
 const fastify = Fastify({ logger: { level: "error" } });
 
 // Unsere Ziel-API-URLs:
-// Wenn nichts in der Umgebungsvariable LIDARR_API_URL steht, setzen wir standardmäßig:
-// - Für API-Version v0.4: "https://api.lidarr.audio/api/v0.4"
-// - Für API-Version v1: "https://api.lidarr.audio/api/v1"
+// Für "/api/v0.4" und "/api/v1" erwarten wir unterschiedliche Endpunkte.
 const defaultLidarrApiUrlV04 = process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 const defaultLidarrApiUrlV1 = process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v1";
 const scrobblerApiUrl = "https://ws.audioscrobbler.com";
@@ -38,16 +36,16 @@ function rewriteUrl(u: URL): { path: string; version: string } {
   return { path: path + u.search, version };
 }
 
-// Liefert den Request-Body als String (falls vorhanden)
+// Liefert den Request-Body nur, wenn die Methode ihn zulässt.
 function getRequestBody(req: FastifyRequest): undefined | string {
-  return (req.method === "GET" || req.method === "HEAD")
+  return req.method === "GET" || req.method === "HEAD"
     ? undefined
     : req.body
     ? req.body.toString()
     : undefined;
 }
 
-// doScrobbler: Behandelt Anfragen, die über den Scrobbler (Last.fm) laufen.
+// doScrobbler: Behandelt Anfragen für den Scrobbler (Last.fm)
 async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
@@ -59,27 +57,32 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
       nh[key] = value;
     }
   });
-  const finalUrl = `${scrobblerApiUrl}${u.pathname}${u.search}`;
-  let response;
+  const url = `${u.pathname}${u.search}`;
+  let data: any;
   try {
-    response = await fetch(finalUrl, { method, body, headers: nh });
+    data = await fetch(`${scrobblerApiUrl}${url}`, {
+      method: method,
+      body: body,
+      headers: nh,
+    });
   } catch (e) {
     console.error("Error in doScrobbler fetch:", e);
     res.statusCode = 500;
     return { newres: res, data: { error: "Scrobbler fetch error" } };
   }
-  res.statusCode = response.status;
-  if (response.headers.delete) {
-    response.headers.delete("content-encoding");
-  }
-  let json = await response.json();
+  res.statusCode = data.status;
+  // Setze Response-Header über res.header()
+  data.headers.forEach((value: string, key: string) => {
+    res.header(key, value);
+  });
+  let json = await data.json();
   if (process.env.OVERRIDE_MB === "true") {
-    json = removeKeys(json, "mbid");
+    json = removeKeys(json, ["mbid"]);
   }
   return { newres: res, data: json };
 }
 
-// doApi: Behandelt alle Anfragen an die Lidarr-API.
+// doApi: Behandelt Anfragen an die Lidarr-API.
 async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
@@ -91,14 +94,14 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
       nh[key] = value;
     }
   });
-  
-  // URL-Pfad umschreiben: Entferne "/api/v0.4" oder "/api/v1" Präfix
+
+  // Schreibe den URL um: Entferne Version-Präfix
   const { path, version } = rewriteUrl(u);
-  // Wähle die Zielbasis-URL basierend auf der API-Version
+  // Wähle die Zielbasis-URL basierend auf der API-Version.
   const targetApiUrl = version === "/api/v1" ? defaultLidarrApiUrlV1 : defaultLidarrApiUrlV04;
   const finalUrl = `${targetApiUrl}${path}`;
-  
-  let response;
+
+  let response: any;
   try {
     const fetchOptions: any = { method, headers: nh };
     if (bodyValue !== undefined) fetchOptions.body = bodyValue;
@@ -108,7 +111,6 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     res.statusCode = 500;
     return { newres: res, data: { error: "Internal Server Error", message: e instanceof Error ? e.message : String(e) } };
   }
-  
   let lidarr: any;
   try {
     lidarr = await response.json();
@@ -118,12 +120,10 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     return { newres: res, data: { error: "Internal Server Error", message: "Invalid JSON response" } };
   }
   
-  // Zusätzliche Verarbeitung je nach Pfad:
+  // Zusätzliche Verarbeitung basierend auf dem Pfad:
   if (u.pathname.includes("/search")) {
-    // Hier könntest du eine weitere Suche durchführen oder die Ergebnisse anpassen.
-    // Falls nötig, füge hier deine Logik ein.
+    lidarr = await search(lidarr, u.searchParams.get("query") as string, u.search.includes("type=all"));
   }
-  
   if (u.pathname.includes("/artist/")) {
     if (u.pathname.includes("-aaaa-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
@@ -137,7 +137,6 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
       }
     }
   }
-  
   if (u.pathname.includes("/album/")) {
     if (u.pathname.includes("-bbbb-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
@@ -146,13 +145,15 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     }
   }
   
-  if (response.headers && response.headers.delete) {
-    response.headers.delete("content-encoding");
+  // Setze Header der offiziellen Antwort in FastifyReply
+  if (response.headers && response.headers.forEach) {
+    response.headers.forEach((value: string, key: string) => {
+      res.header(key, value);
+    });
   }
   
   console.log(response.status, method, u.pathname + u.search);
   res.statusCode = response.status;
-  res.headers = response.headers;
   return { newres: res, data: lidarr };
 }
 
@@ -160,11 +161,9 @@ fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
   const host = req.headers["x-proxy-host"];
   if (host === "ws.audioscrobbler.com") {
     const { newres, data } = await doScrobbler(req, res);
-    res = newres;
     return data;
   } else {
     const { newres, data } = await doApi(req, res);
-    res = newres;
     return data;
   }
 });
