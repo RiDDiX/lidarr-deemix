@@ -55,26 +55,27 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     if (key !== "host" && key !== "connection") headers[key] = value;
   });
 
-  // Entferne den doppelten "/api/v0.4"-Präfix, falls dieser im Pfad bereits vorhanden ist.
+  // Nehmen wir an, der eingehende Pfad kann entweder mit "/api/v0.4" oder "/api/v1" beginnen.
   let urlPath = u.pathname;
-  const apiPrefix = "/api/v0.4";
-  if (urlPath.startsWith(apiPrefix)) {
-    urlPath = urlPath.substring(apiPrefix.length);
-    if (!urlPath.startsWith("/")) {
-      urlPath = "/" + urlPath;
-    }
+  if (urlPath.startsWith("/api/v0.4")) {
+    urlPath = urlPath.substring("/api/v0.4".length);
+  } else if (urlPath.startsWith("/api/v1")) {
+    urlPath = urlPath.substring("/api/v1".length);
+  }
+  if (!urlPath.startsWith("/")) {
+    urlPath = "/" + urlPath;
   }
   urlPath = urlPath + u.search;
 
   // 1. Künstler-Suche
-  if (u.pathname.startsWith("/api/v0.4/search/artists")) {
+  if (u.pathname.startsWith("/api/v0.4/search/artists") || u.pathname.startsWith("/api/v1/search/artists")) {
     const data = await handleArtistSearch(req);
     res.statusCode = 200;
     return data;
   }
 
   // 2. Künstler-Details
-  if (u.pathname.startsWith("/api/v0.4/artist/")) {
+  if (u.pathname.startsWith("/api/v0.4/artist/") || u.pathname.startsWith("/api/v1/artist/")) {
     const query = u.searchParams.get("query") || "";
     if (process.env.FALLBACK_DEEZER === "true") {
       const fallback = await deemixArtist(query);
@@ -93,7 +94,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   }
 
   // 3. Album-Anfragen (Beispiel: /api/v0.4/album/...)
-  if (u.pathname.startsWith("/api/v0.4/album/")) {
+  if (u.pathname.startsWith("/api/v0.4/album/") || u.pathname.startsWith("/api/v1/album/")) {
     if (u.pathname.includes("-bbbb-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
       if (id) {
