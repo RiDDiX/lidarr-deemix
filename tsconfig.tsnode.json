@@ -3,6 +3,6 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "files": ["./deemix.ts", "./index.ts", "./lidarr.ts", "./artistData.ts"],
-  "include": ["./*.ts"]
+  "files": ["artistData.ts", "src/deemix.ts", "src/index.ts", "src/lidarr.ts"],
+  "include": ["./*.ts", "src/**/*.ts"]
 }
