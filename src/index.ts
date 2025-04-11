@@ -15,7 +15,9 @@ const defaultLidarrApiUrl =
 
 // Liefert den Request-Body nur, wenn die Methode ihn zulässt.
 function getRequestBody(req: FastifyRequest): undefined | string {
-  return (req.method === "GET" || req.method === "HEAD") ? undefined : req.body ? req.body.toString() : undefined;
+  return (req.method === "GET" || req.method === "HEAD")
+    ? undefined
+    : req.body ? req.body.toString() : undefined;
 }
 
 // Für GET /api/v0.4/search/artists: Musikbrainz-Abfrage, ggf. Fallback auf Deezer.
@@ -30,8 +32,10 @@ async function handleArtistSearch(req: FastifyRequest): Promise<any[]> {
   try {
     const mbResponse = await fetch(musicBrainzUrl);
     const mbJson = await mbResponse.json();
-    if (mbJson && mbJson.artists && Array.isArray(mbJson.artists) && mbJson.artists.length > 0) {
-      return mbJson.artists;
+    // Überprüfe, ob mbJson ein Objekt mit "artists" ist:
+    const artists = Array.isArray(mbJson.artists) ? mbJson.artists : [];
+    if (artists.length > 0) {
+      return artists;
     } else {
       return await deemixArtists(query);
     }
@@ -67,7 +71,7 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
       res.statusCode = fallback ? 200 : 404;
       return fallback;
     }
-    const mbData = await getArtistData(query);
+    const mbData = getArtistData(query);
     if (mbData && mbData.albums && mbData.albums.length > 0) {
       res.statusCode = 200;
       return mbData;

@@ -8,7 +8,7 @@ import { getArtistData } from "./artistData.js";
 function deduplicateAlbums(albums: any[]): any[] {
   const deduped: any[] = [];
   for (const album of albums) {
-    // Verwende hier "Title" aus den DTOs, falls diese so erstellt werden.
+    // Hier wird davon ausgegangen, dass das DTO-Feld "Title" benutzt wird
     if (!deduped.some(a => normalize(a.Title) === normalize(album.Title))) {
       deduped.push(album);
     }
@@ -121,7 +121,7 @@ async function deemixAlbums(name: string): Promise<any[]> {
 
 export async function getArtist(lidarr: any): Promise<any> {
   if (lidarr["error"]) return lidarr;
-  const mbArtist = await getArtistData(lidarr["artistname"]);
+  const mbArtist = getArtistData(lidarr["artistname"]); // Nun wird ein Parameter übergeben
   if (mbArtist && mbArtist.albums && mbArtist.albums.length > 0) {
     const deemixAlbumsResult = await getAlbums(lidarr["artistname"]);
     mbArtist.albums = mergeAlbumLists(mbArtist.albums, deemixAlbumsResult);
