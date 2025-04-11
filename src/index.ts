@@ -1,26 +1,49 @@
 import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import dotenv from "dotenv";
-import { getArtist, getAlbum, deemixArtist, deemixArtists } from "./deemix.js";
+import _ from "lodash";
+import {
+  search,
+  getArtist,
+  getAlbum,
+  deemixArtist,
+  deemixArtists,
+} from "./deemix.js";
 import { removeKeys } from "./helpers.js";
 import { getArtistData } from "./artistData.js";
 
 dotenv.config();
 
-const fastify = Fastify({ logger: { level: "error" } });
+const fastify = Fastify({
+  logger: { level: "error" },
+});
 
-// Offizieller API-Endpoint – wird genutzt, falls FALLBACK_DEEZER nicht aktiv ist.
-const defaultLidarrApiUrl =
-  process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
+// Falls in der Umgebungsvariable nichts gesetzt ist, verwenden wir standardmäßig:
+// - Für "/api/v0.4": https://api.lidarr.audio/api/v0.4
+// - Für "/api/v1": https://api.lidarr.audio/api/v1
+// Diese Logik erkennen wir anhand des Request-Pfads.
+function getTargetApiUrl(u: URL): string {
+  let versionPrefix = "";
+  if (u.pathname.startsWith("/api/v1")) {
+    versionPrefix = "/api/v1";
+  } else if (u.pathname.startsWith("/api/v0.4")) {
+    versionPrefix = "/api/v0.4";
+  }
+  // Falls die Umgebungsvariable gesetzt ist, nutzen wir diese.
+  // Ansonsten bauen wir den Standard zusammen:
+  return process.env.LIDARR_API_URL || `https://api.lidarr.audio${versionPrefix}`;
+}
 
 // Liefert den Request-Body nur, wenn die Methode ihn zulässt.
 function getRequestBody(req: FastifyRequest): undefined | string {
-  return (req.method === "GET" || req.method === "HEAD")
+  return req.method === "GET" || req.method === "HEAD"
     ? undefined
-    : req.body ? req.body.toString() : undefined;
+    : req.body
+    ? req.body.toString()
+    : undefined;
 }
 
-// Für GET /api/v0.4/search/artists: Musikbrainz-Abfrage, ggf. Fallback auf Deezer.
+// Für GET /api/v0.4/search/artists oder /api/v1/search/artists: MusikBrainz‑Abfrage, ggf. Fallback auf Deezer.
 async function handleArtistSearch(req: FastifyRequest): Promise<any[]> {
   const u = new URL(`http://localhost${req.url}`);
   const query = u.searchParams.get("query") || "";
@@ -55,27 +78,38 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     if (key !== "host" && key !== "connection") headers[key] = value;
   });
 
-  // Nehmen wir an, der eingehende Pfad kann entweder mit "/api/v0.4" oder "/api/v1" beginnen.
-  let urlPath = u.pathname;
-  if (urlPath.startsWith("/api/v0.4")) {
-    urlPath = urlPath.substring("/api/v0.4".length);
-  } else if (urlPath.startsWith("/api/v1")) {
-    urlPath = urlPath.substring("/api/v1".length);
+  // Erkenne den Version-Präfix ("/api/v1" oder "/api/v0.4") und entferne ihn für den finalen Pfad.
+  let versionPrefix = "";
+  if (u.pathname.startsWith("/api/v1")) {
+    versionPrefix = "/api/v1";
+  } else if (u.pathname.startsWith("/api/v0.4")) {
+    versionPrefix = "/api/v0.4";
   }
+  let urlPath = u.pathname.substring(versionPrefix.length);
   if (!urlPath.startsWith("/")) {
     urlPath = "/" + urlPath;
   }
   urlPath = urlPath + u.search;
 
-  // 1. Künstler-Suche
-  if (u.pathname.startsWith("/api/v0.4/search/artists") || u.pathname.startsWith("/api/v1/search/artists")) {
+  // Bestimme die Ziel-URL anhand des erkannte API-Version-Präfixes.
+  const targetApiUrl = getTargetApiUrl(u);
+  const finalUrl = `${targetApiUrl}${urlPath}`;
+
+  // Spezielle Behandlung: Wenn die Anfrage eine Künstler-Suche betrifft.
+  if (
+    u.pathname.startsWith("/api/v0.4/search/artists") ||
+    u.pathname.startsWith("/api/v1/search/artists")
+  ) {
     const data = await handleArtistSearch(req);
     res.statusCode = 200;
     return data;
   }
 
-  // 2. Künstler-Details
-  if (u.pathname.startsWith("/api/v0.4/artist/") || u.pathname.startsWith("/api/v1/artist/")) {
+  // Künstler-Details:
+  if (
+    u.pathname.startsWith("/api/v0.4/artist/") ||
+    u.pathname.startsWith("/api/v1/artist/")
+  ) {
     const query = u.searchParams.get("query") || "";
     if (process.env.FALLBACK_DEEZER === "true") {
       const fallback = await deemixArtist(query);
@@ -93,8 +127,11 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     }
   }
 
-  // 3. Album-Anfragen (Beispiel: /api/v0.4/album/...)
-  if (u.pathname.startsWith("/api/v0.4/album/") || u.pathname.startsWith("/api/v1/album/")) {
+  // Album-Anfragen (Beispiel: /api/v0.4/album/... oder /api/v1/album/...)
+  if (
+    u.pathname.startsWith("/api/v0.4/album/") ||
+    u.pathname.startsWith("/api/v1/album/")
+  ) {
     if (u.pathname.includes("-bbbb-")) {
       let id = u.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
       if (id) {
@@ -104,8 +141,8 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
       }
     }
   }
-  
-  // 4. Wenn FALLBACK_DEEZER true ist, greifen wir komplett auf den Deezer-Fallback.
+
+  // Fallback: Wenn FALLBACK_DEEZER true ist, komplett auf Deezer zurückgreifen.
   if (process.env.FALLBACK_DEEZER === "true") {
     const query = u.searchParams.get("query") || "";
     const fallback = await deemixArtist(query);
@@ -113,12 +150,12 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
     return fallback;
   }
 
-  // 5. Standardweiterleitung an den offiziellen API-Endpoint.
-  const finalUrl = `${defaultLidarrApiUrl}${urlPath}`;
+  // Standardweiterleitung an den offiziellen API-Endpoint.
   try {
     const fetchOptions: any = { method, headers };
     if (bodyValue !== undefined) fetchOptions.body = bodyValue;
     const response = await fetch(finalUrl, fetchOptions);
+    // Falls offizielle API fehlerhaft antwortet und FALLBACK_DEEZER aktiv ist:
     if (!response.ok && process.env.FALLBACK_DEEZER === "true") {
       console.error(`Fehler vom offiziellen API-Endpoint (Status: ${response.status}). Fallback auf Deezer.`);
       const query = u.searchParams.get("query") || "";
@@ -158,7 +195,16 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
 }
 
 fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
-  return await doProxy(req, res);
+  const host = req.headers["x-proxy-host"];
+  if (host === "ws.audioscrobbler.com") {
+    const { newres, data } = await doScrobbler(req, res);
+    res = newres;
+    return data;
+  } else {
+    const { newres, data } = await doApi(req, res);
+    res = newres;
+    return data;
+  }
 });
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
@@ -166,8 +212,8 @@ fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
     console.error(err);
     process.exit(1);
   }
-  console.log("Lidarr++Deemix Proxy running at " + address);
+  console.log("Lidarr++Deemix running at " + address);
   if (process.env.OVERRIDE_MB === "true") {
-    console.log("Overriding MusicBrainz API with Deezer fallback");
+    console.log("Overriding MusicBrainz API with Deemix API");
   }
 });
