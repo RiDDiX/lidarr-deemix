@@ -367,7 +367,7 @@ export async function getArtist(lidarr: any): Promise<any> {
   const mbArtist = await getArtistData(lidarr["artistname"]);
   if (mbArtist && mbArtist.Albums && mbArtist.Albums.length > 0) {
     const deemixAlbums = await getAlbums(lidarr["artistname"]);
-    mbArtist.Albums = mergeAlbumLists(mbArtist.Albums, deemixAlbums);
+    mbArtist.albums = mergeAlbumLists(mbArtist.albums, deemixAlbums);
     if (!mbArtist.images || mbArtist.images.length === 0) {
       const dArtist = await deemixArtist(lidarr["artistname"]);
       if (dArtist && dArtist.images && dArtist.images.length > 0) {
