@@ -16,12 +16,19 @@ dotenv.config();
 const fastify = Fastify({ logger: { level: "error" } });
 
 // Unsere Ziel-API-URLs:
-// Für "/api/v0.4" und "/api/v1" erwarten wir unterschiedliche Endpunkte.
+// Für API-Version v0.4: Standardmäßig wird "/api/v0.4" verwendet,
+// für API-Version v1: Standardmäßig wird "/api/v1" verwendet.
 const defaultLidarrApiUrlV04 = process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v0.4";
 const defaultLidarrApiUrlV1 = process.env.LIDARR_API_URL || "https://api.lidarr.audio/api/v1";
 const scrobblerApiUrl = "https://ws.audioscrobbler.com";
 
-// Hilfsfunktion: Entferne den Version-Präfix vom eingehenden Pfad
+// Minimale Implementierung von search, falls benötigt.
+// Hier wird einfach das übergebene lidarr-Objekt zurückgegeben.
+async function search(lidarr: any, query: string, isAll: boolean): Promise<any> {
+  return lidarr;
+}
+
+// Hilfsfunktion: Entferne den Version-Präfix vom eingehenden Pfad.
 function rewriteUrl(u: URL): { path: string; version: string } {
   let version = "";
   if (u.pathname.startsWith("/api/v1")) {
@@ -36,7 +43,7 @@ function rewriteUrl(u: URL): { path: string; version: string } {
   return { path: path + u.search, version };
 }
 
-// Liefert den Request-Body nur, wenn die Methode ihn zulässt.
+// Liefert den Request-Body als String (falls vorhanden).
 function getRequestBody(req: FastifyRequest): undefined | string {
   return req.method === "GET" || req.method === "HEAD"
     ? undefined
@@ -45,7 +52,7 @@ function getRequestBody(req: FastifyRequest): undefined | string {
     : undefined;
 }
 
-// doScrobbler: Behandelt Anfragen für den Scrobbler (Last.fm)
+// doScrobbler: Behandelt Anfragen, die an den Scrobbler-Endpoint (Last.fm) gehen.
 async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
@@ -71,7 +78,7 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
     return { newres: res, data: { error: "Scrobbler fetch error" } };
   }
   res.statusCode = data.status;
-  // Setze Response-Header über res.header()
+  // Header-Übernahme: Iteriere über die Response-Header und setze sie im Fastify-Reply
   data.headers.forEach((value: string, key: string) => {
     res.header(key, value);
   });
@@ -82,7 +89,7 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
   return { newres: res, data: json };
 }
 
-// doApi: Behandelt Anfragen an die Lidarr-API.
+// doApi: Behandelt Anfragen an den Lidarr-API-Endpoint.
 async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
   const headers = req.headers;
   const u = new URL(`http://localhost${req.url}`);
@@ -94,13 +101,13 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
       nh[key] = value;
     }
   });
-
-  // Schreibe den URL um: Entferne Version-Präfix
+  
+  // Schreibe den URL um: Entferne "/api/v0.4" oder "/api/v1" vom Anfang.
   const { path, version } = rewriteUrl(u);
   // Wähle die Zielbasis-URL basierend auf der API-Version.
   const targetApiUrl = version === "/api/v1" ? defaultLidarrApiUrlV1 : defaultLidarrApiUrlV04;
   const finalUrl = `${targetApiUrl}${path}`;
-
+  
   let response: any;
   try {
     const fetchOptions: any = { method, headers: nh };
@@ -111,6 +118,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     res.statusCode = 500;
     return { newres: res, data: { error: "Internal Server Error", message: e instanceof Error ? e.message : String(e) } };
   }
+  
   let lidarr: any;
   try {
     lidarr = await response.json();
@@ -145,7 +153,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
     }
   }
   
-  // Setze Header der offiziellen Antwort in FastifyReply
+  // Header-Übernahme: Iteriere über die offiziellen Response-Header und setze sie in FastifyReply.
   if (response.headers && response.headers.forEach) {
     response.headers.forEach((value: string, key: string) => {
       res.header(key, value);
