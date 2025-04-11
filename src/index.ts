@@ -54,7 +54,17 @@ async function doProxy(req: FastifyRequest, res: FastifyReply): Promise<any> {
   Object.entries(req.headers).forEach(([key, value]) => {
     if (key !== "host" && key !== "connection") headers[key] = value;
   });
-  const urlPath = `${u.pathname}${u.search}`;
+
+  // Entferne den doppelten "/api/v0.4"-Präfix, falls dieser im Pfad bereits vorhanden ist.
+  let urlPath = u.pathname;
+  const apiPrefix = "/api/v0.4";
+  if (urlPath.startsWith(apiPrefix)) {
+    urlPath = urlPath.substring(apiPrefix.length);
+    if (!urlPath.startsWith("/")) {
+      urlPath = "/" + urlPath;
+    }
+  }
+  urlPath = urlPath + u.search;
 
   // 1. Künstler-Suche
   if (u.pathname.startsWith("/api/v0.4/search/artists")) {
