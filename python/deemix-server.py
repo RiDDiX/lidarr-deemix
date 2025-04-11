@@ -43,6 +43,14 @@ def normalize_title(title: str) -> str:
 
 
 def combine_results(results1, results2, key: str) -> list:
+    # Falls Ergebnisse als dict vorliegen, extrahiere die Liste
+    if isinstance(results1, dict):
+        # Für MusicBrainz erwarten wir typischerweise einen Schlüssel "artists"
+        results1 = results1.get("artists", [])
+    if isinstance(results2, dict):
+        # Für Deezer/Deemix wird oft ein "data"-Feld genutzt
+        results2 = results2.get("data", [])
+    
     seen = set()
     combined = []
     for item in results1 + results2:
