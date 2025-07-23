@@ -1,26 +1,24 @@
-FROM node:20-alpine AS builder
+FROM python:3.12-alpine
 
 WORKDIR /app
-RUN apk add --no-cache build-base python3-dev
 
+RUN apk add --no-cache \
+      bash build-base curl openssl-dev libffi-dev pkgconf python3-dev \
+      nodejs npm
+
+# Python
+COPY python/requirements.txt python/requirements.txt
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install --no-cache-dir -r python/requirements.txt
+
+# Node / TS
 COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm
-RUN pnpm install
-
-COPY tsconfig*.json ./
-COPY src ./src
-
+RUN npm install -g pnpm && pnpm install
+COPY . .
 RUN pnpm build
 
-FROM node:20-alpine
+# Nur den MITM‑Proxy dokumentieren
+EXPOSE 8080
 
-WORKDIR /app
-
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-
-ENV NODE_ENV=production
-EXPOSE 3000
-
-CMD ["node", "dist/index.js"]
+RUN chmod +x run.sh
+CMD ["./run.sh"]
