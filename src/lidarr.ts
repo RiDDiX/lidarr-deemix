@@ -1,58 +1,51 @@
-// lidarr.ts
+import fetch from "node-fetch";
+import { FastifyRequest, FastifyReply } from "fastify";
+import { deemixSearch, deemixArtist, deemixAlbum } from "./deemix.js";
 import { normalize } from "./helpers.js";
 
-const lidarrApiUrl = "https://api.lidarr.audio";
+const lidarrApi = "https://api.lidarr.audio";
 
-/**
- * Sucht einen einzelnen Künstler in Lidarr anhand des Namens.
- */
-export async function getLidarrArtist(name: string): Promise<any | null> {
-  try {
-    const res = await fetch(`${lidarrApiUrl}/api/v0.4/search?type=all&query=${encodeURIComponent(name)}`);
-    if (!res.ok) {
-      throw new Error(`HTTP error: ${res.status}`);
-    }
-    const jsonRaw: unknown = await res.json();
-    if (!Array.isArray(jsonRaw)) {
-      throw new Error("Erwartetes Array nicht erhalten");
-    }
-    const json = jsonRaw as any[];
-    const a = json.find(
-      (a) =>
-        a["album"] === null &&
-        a["artist"] &&
-        normalize(a["artist"]["artistname"]) === normalize(name)
-    );
-    return typeof a !== "undefined" ? a["artist"] : null;
-  } catch (error) {
-    console.error("Error fetching Lidarr artist:", error);
-    return null;
-  }
-}
+export async function proxyToLidarr(req: FastifyRequest, reply: FastifyReply) {
+  const u = new URL(`http://localhost${req.url}`);
+  const url = `${lidarrApi}${u.pathname}${u.search}`;
 
-/**
- * Holt alle Künstler aus der Lidarr-Instanz.
- */
-export async function getAllLidarrArtists(): Promise<any[]> {
-  try {
-    const url = `${process.env.LIDARR_URL}/api/v1/artist`;
-    const apiKey = process.env.LIDARR_API_KEY as string;
-    if (!url || !apiKey) {
-      throw new Error("LIDARR_URL or LIDARR_API_KEY not defined");
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (typeof value === "string" && !["host", "connection"].includes(key)) {
+      headers[key] = value;
     }
-    const res = await fetch(url, {
-      headers: { "X-Api-Key": apiKey },
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP error: ${res.status}`);
-    }
-    const jsonRaw: unknown = await res.json();
-    if (!Array.isArray(jsonRaw)) {
-      throw new Error("Erwartetes Array nicht erhalten");
-    }
-    return jsonRaw as any[];
-  } catch (error) {
-    console.error("Error fetching all Lidarr artists:", error);
-    return [];
   }
+
+  const fetchOpts: any = {
+    method: req.method,
+    headers,
+    body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
+  };
+
+  let res = await fetch(url, fetchOpts);
+  let json = await res.json();
+
+  if (u.pathname.includes("/search") && process.env.FALLBACK_DEEZER === "true") {
+    const query = u.searchParams.get("query") || "";
+    const dee = await deemixSearch(query);
+    json = [...json, ...dee];
+  }
+
+  if (u.pathname.includes("/artist/")) {
+    const id = u.pathname.split("/").pop()!;
+    if (id.includes("-aaaa-")) {
+      const numericId = id.split("-").pop()?.replaceAll("a", "");
+      json = await deemixArtist(numericId || "");
+    }
+  }
+
+  if (u.pathname.includes("/album/")) {
+    const id = u.pathname.split("/").pop()!;
+    if (id.includes("-bbbb-")) {
+      const numericId = id.split("-").pop()?.replaceAll("b", "");
+      json = await deemixAlbum(numericId || "");
+    }
+  }
+
+  reply.status(res.status).headers(res.headers.raw()).send(json);
 }

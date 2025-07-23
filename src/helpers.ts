@@ -1,20 +1,17 @@
 export function removeKeys(obj: any, keys: string[]): any {
   if (Array.isArray(obj)) {
-    return obj.map((item) => removeKeys(item, keys));
+    return obj.map((v) => removeKeys(v, keys));
   } else if (typeof obj === "object" && obj !== null) {
-    const newObj: any = {};
-    for (const key in obj) {
+    return Object.keys(obj).reduce((acc, key) => {
       if (!keys.includes(key)) {
-        newObj[key] = removeKeys(obj[key], keys);
+        acc[key] = removeKeys(obj[key], keys);
       }
-    }
-    return newObj;
+      return acc;
+    }, {} as any);
   }
   return obj;
 }
 
-export function normalize(input: string): string {
-  return input
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/[^
+export function normalize(str: string): string {
+  return str.toLowerCase().replace(/[^a-z0-9]/gi, "");
+}

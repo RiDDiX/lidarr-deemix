@@ -1,8 +1,7 @@
 {
-  "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src"
-  },
-  "files": ["./deemix.ts", "./index.ts", "./lidarr.ts", "./artistData.ts"],
-  "include": ["./*.ts"]
+  "extends": "./tsconfig.json",
+  "ts-node": {
+    "transpileOnly": true,
+    "esm": false
+  }
 }
