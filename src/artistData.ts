@@ -1,18 +1,20 @@
-import fetch from "node-fetch";
+import { deemixSearch, deemixArtist } from "./deemix.js";
+import { normalize } from "./helpers.js";
 
 export async function getArtistData(query: string): Promise<any> {
   if (!query) return null;
-  const url = `https://api.musicbrainz.org/ws/2/artist?query=${encodeURIComponent(query)}&fmt=json`;
-  const res = await fetch(url);
-  const data = await res.json();
 
-  if (!data.artists?.length) return null;
+  try {
+    const results = await deemixSearch(query);
+    if (!results || results.length === 0) return null;
 
-  const artist = data.artists[0];
-  return {
-    artistName: artist.name,
-    artistId: artist.id,
-    overview: artist.disambiguation ?? "Imported from MusicBrainz",
-    Albums: [], // MB liefert keine vollständigen Alben direkt – ggf. ergänzbar
-  };
+    const artist = results.find((r) => normalize(r.artist.name) === normalize(query)) || results[0];
+    if (!artist || !artist.artist || !artist.artist.id) return null;
+
+    const artistId = artist.artist.id;
+    return await deemixArtist(artistId);
+  } catch (err) {
+    console.error("Error in getArtistData:", err);
+    return null;
+  }
 }

@@ -16,7 +16,5 @@ export function removeKeys(obj: any, keys: string[]): any {
 export function normalize(input: string): string {
   return input
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\w\s]/gi, "")
-    .toLowerCase();
-}
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^
