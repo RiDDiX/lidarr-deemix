@@ -1,4 +1,3 @@
-# python/deemix-server.py
 from os import environ
 from deezer import Deezer
 from pathlib import Path

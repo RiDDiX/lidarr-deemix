@@ -1,4 +1,3 @@
-// src/helpers.ts
 export function normalizeTitle(title: string): string {
   return title
     .normalize('NFKD')

@@ -1,4 +1,3 @@
-// src/lidarr.ts
 import fetch from 'node-fetch';
 
 export async function searchMusicbrainz(
