@@ -66,8 +66,8 @@ COPY --from=node-builder /app/package.json ./package.json
 COPY run.sh .
 
 # Expose Ports wie gewünscht
-EXPOSE 8080   # dein TypeScript/Node-Server
-EXPOSE 7272   # dein Deemix‑Python‑Server
+EXPOSE 8080 
+
 
 # Standardbefehl: passe es an dein run.sh oder Entrypoint an
 CMD ["sh", "run.sh"]
