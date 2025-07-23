@@ -1,50 +1,54 @@
-# ───────────── Frontend Stage ─────────────
-FROM node:18-alpine AS frontend
+# ----------------------------
+# Stage 1: Build Node/TS app
+# ----------------------------
+FROM node:18-alpine AS node_builder
 
 WORKDIR /app
+# install pnpm and node deps
 COPY package.json pnpm-lock.yaml ./
-
-# pnpm installieren und Abhängigkeiten einspielen
 RUN npm install -g pnpm \
  && pnpm install --frozen-lockfile
 
-COPY . .
+# compile TS
+COPY tsconfig.json tsconfig.tsnode.json src/ ./src
 RUN pnpm build
 
-# ─────────── Python Builder Stage ───────────
-FROM python:3.12-slim AS builder
+# --------------------------------
+# Stage 2: Install Python deps
+# --------------------------------
+FROM python:3.12-slim AS python_builder
 
-WORKDIR /app
-
-# System‑Deps für build
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      gcc libffi-dev pkg-config libssl-dev \
- && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
+WORKDIR /opt/python
+COPY python/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+COPY python/ .
 
-COPY deemix-server.py http-redirect-request.py ./
+# --------------------------------
+# Stage 3: Final runtime image
+# --------------------------------
+FROM node:18-slim
 
-# ───────────── Runtime Stage ─────────────
-FROM python:3.12-slim
+# install Python runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-pip \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Nur ca‑certificates, keine Build‑Tools
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+# copy built Node app
+COPY --from=node_builder /app/dist ./dist
+COPY --from=node_builder /app/node_modules ./node_modules
 
-# Packages und App kopieren
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /app/deemix-server.py .
-COPY --from=builder /app/http-redirect-request.py .
-COPY --from=frontend /app/dist ./frontend
+# copy Python helper
+COPY --from=python_builder /opt/python ./python
 
-# Port 8080 benutzen
-EXPOSE 8080
+# copy orchestrator script
+COPY run.sh ./
+RUN chmod +x run.sh
 
-# Server starten
-ENTRYPOINT ["waitress-serve", "--port=8080", "deemix-server:app"]
+# expose both services
+EXPOSE 8080   # your TypeScript/Node server
+EXPOSE 7272   # Deemix Python server
+
+# start both with your run.sh
+CMD ["./run.sh"]
