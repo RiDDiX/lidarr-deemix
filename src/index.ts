@@ -1,37 +1,82 @@
-import Fastify from 'fastify'
 import dotenv from 'dotenv'
-import * as lidarr from './lidarr.js'
-import * as deemix from './deemix.js'
+import Fastify from 'fastify'
+import * as deemix from './deemix'
+import * as lidarr from './lidarr'
 
 dotenv.config()
-const server = Fastify({ logger: true })
+const app = Fastify({ logger: true })
 
-// Gemeinsame Suche
-server.get('/api/v0.4/search', async (req, reply) => {
-  const { query = '', limit = '100', offset = '0' } = (req.query as any)
+// Merge-Helper: dedupe by artist name (case-insensitive)
+function mergeArtists(a: any[] = [], b: any[] = []) {
+  const names = new Set<string>()
+  const merged = []
+  for (const entry of [...a, ...b]) {
+    const normName = (entry.name || '').toLowerCase().trim()
+    if (normName && !names.has(normName)) {
+      names.add(normName)
+      merged.push(entry)
+    }
+  }
+  return merged
+}
 
-  // 1) Offizielle Lidarr‑API
-  let lidarrRes = null
+// Unified search: always merge Deezer + Lidarr (Musicbrainz), fallback to Deezer only
+app.get('/api/v0.4/search', async (req, reply) => {
+  const { query = '', limit = '100', offset = '0' } = req.query as any
+
+  let lidarrArtists: any[] = []
+  let deemixArtists: any[] = []
+  let lidarrOk = false
+
   try {
-    lidarrRes = await lidarr.searchLidarr(query, limit, offset)
+    lidarrArtists = await lidarr.searchLidarr(query, limit, offset)
+    lidarrOk = Array.isArray(lidarrArtists) && lidarrArtists.length > 0
   } catch (err) {
-    server.log.warn(`Lidarr failed: ${(err as Error).message}`)
+    app.log.warn('Lidarr/Musicbrainz not available: ' + (err as Error).message)
+  }
+  try {
+    deemixArtists = await deemix.searchDeemix(query, limit, offset)
+  } catch (err) {
+    app.log.warn('Deemix/Deezer not available: ' + (err as Error).message)
   }
 
-  // 2) Deezer/Deemix immer zusätzlich
-  let deemixRes = null
-  try {
-    deemixRes = await deemix.searchDeemix(query, limit, offset)
-  } catch (err) {
-    server.log.warn(`Deemix failed: ${(err as Error).message}`)
+  let result: any[]
+  if (lidarrOk) {
+    result = mergeArtists(lidarrArtists, deemixArtists)
+  } else {
+    result = mergeArtists([], deemixArtists)
   }
-
-  return { lidarr: lidarrRes, deemix: deemixRes }
+  reply.send(result)
 })
 
-// Einzel‑Artist: Lidarr, sonst Deemix
-server.get('/api/v0.4/artist/:id', async (req, reply) => {
-  const id = (req.params as any).id
+// Add artist (Deezer OR Lidarr)
+app.post('/api/v0.4/artist', async (req, reply) => {
+  const { source, id } = req.body as any
+  if (!source || !id) return reply.code(400).send({ error: 'source and id required' })
+
+  if (source === 'deezer') {
+    // Deezer-Artist hinzufügen (fix!)
+    try {
+      const added = await deemix.addDeezerArtist(id)
+      reply.send({ ok: true, added })
+    } catch (err) {
+      reply.code(500).send({ error: (err as Error).message })
+    }
+  } else if (source === 'lidarr') {
+    try {
+      const added = await lidarr.addLidarrArtist(id)
+      reply.send({ ok: true, added })
+    } catch (err) {
+      reply.code(500).send({ error: (err as Error).message })
+    }
+  } else {
+    reply.code(400).send({ error: 'Unknown source' })
+  }
+})
+
+// Get artist by ID (tries Lidarr first, then Deezer)
+app.get('/api/v0.4/artist/:id', async (req, reply) => {
+  const { id } = req.params as any
   try {
     return await lidarr.getArtistLidarr(id)
   } catch {
@@ -39,6 +84,11 @@ server.get('/api/v0.4/artist/:id', async (req, reply) => {
   }
 })
 
-const PORT = parseInt(process.env.PORT as string, 10) || 7171
-await server.listen({ port: PORT, host: '0.0.0.0' })
-server.log.info(`Listening on ${PORT}`)
+const PORT = parseInt(process.env.PORT as string) || 8080
+app.listen({ port: PORT, host: '0.0.0.0' }, (err, address) => {
+  if (err) {
+    app.log.error(err)
+    process.exit(1)
+  }
+  app.log.info(`Listening on ${PORT}`)
+})

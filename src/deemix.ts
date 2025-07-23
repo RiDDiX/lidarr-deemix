@@ -1,24 +1,30 @@
-import { fetchWithTimeout, buildQuery } from './helpers.js'
+import fetch from 'node-fetch'
+import { cleanArtist } from './helpers'
 
-const BASE = process.env.DEEMIX_URL || 'http://127.0.0.1:7171'
+const DEEMIX_URL = process.env.DEEMIX_URL || 'http://localhost:6595'
 
-export async function searchDeemix(
-  query: string,
-  limit = '100',
-  offset = '0'
-): Promise<any> {
-  const qs = buildQuery({ q: query, limit, offset })
-  const res = await fetchWithTimeout(`${BASE}/search/artists?${qs}`, {
-    method: 'GET'
-  })
-  if (!res.ok) throw new Error(`Deemix search ${res.status}`)
-  return res.json()
+// Suche Deezer/Deemix-Artists
+export async function searchDeemix(query: string, limit: string | number = 100, offset: string | number = 0) {
+  const url = `${DEEMIX_URL}/search/artists?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('Deemix search ' + res.status)
+  const json = await res.json()
+  return (json.data || []).map(cleanArtist)
 }
 
-export async function getArtistDeemix(artistId: string): Promise<any> {
-  const res = await fetchWithTimeout(`${BASE}/artists/${artistId}`, {
-    method: 'GET'
-  })
-  if (!res.ok) throw new Error(`Deemix getArtist ${res.status}`)
-  return res.json()
+// Holt einen einzelnen Deezer/Deemix-Artist
+export async function getArtistDeemix(id: string) {
+  const url = `${DEEMIX_URL}/artist/${id}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('Deemix artist ' + res.status)
+  const json = await res.json()
+  return cleanArtist(json)
+}
+
+// Deezer-Artist zu Favoriten/Hinzufügen (hier ggf. POST oder passendes API-Call anpassen)
+export async function addDeezerArtist(id: string) {
+  const url = `${DEEMIX_URL}/favorite/artists/${id}`
+  const res = await fetch(url, { method: 'POST' })
+  if (!res.ok) throw new Error('Deemix add artist ' + res.status)
+  return await res.json()
 }
