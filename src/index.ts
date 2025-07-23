@@ -1,27 +1,20 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
-import express from "express";
-import { mergeArtists, getArtistsFromAllSources } from "./helpers";
+import fastify from 'fastify';
+import { handleLidarrRequest } from './lidarr';
+import { handleDeemixRequest } from './deemix';
 
-const app = express();
-const port = process.env.PORT || 3000;
+const app = fastify();
 
-app.use(express.json());
+app.get('/api/lidarr/:artist', handleLidarrRequest);
+app.get('/api/deemix/:track', handleDeemixRequest);
 
-app.get("/api/v1/search", async (req, res) => {
-  const searchTerm = req.query.term as string;
-  try {
-    const results = await getArtistsFromAllSources(searchTerm);
-    res.json(results);
-  } catch (e) {
-    // Wenn beide Quellen down, gib leeres Array zurück
-    res.status(200).json([]);
+const PORT = process.env.PORT || 8080;
+app.listen({ port: Number(PORT), host: '0.0.0.0' }, (err, address) => {
+  if (err) {
+    app.log.error(err);
+    process.exit(1);
   }
-});
-
-// ggf. andere Endpunkte...
-
-app.listen(port, () => {
-  console.log(`Listening on port ${port}`);
+  console.log(`Server running at ${address}`);
 });
