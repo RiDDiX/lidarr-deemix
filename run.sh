@@ -1,8 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-nohup python ./python/deemix-server.py   > /app/nohup_deemix.txt   2>&1 &
-nohup pnpm run start                    > /app/nohup_server.txt    2>&1 &
-nohup mitmdump -s ./python/http-redirect-request.py > /app/nohup_mitmdump.txt 2>&1 &
+# start Python Deemix‑Server
+python python/deemix-server.py &
+# build & start Node‑Proxy
+pnpm run start &
+# start mitmproxy
+mitmdump -s python/http-redirect-request.py &
 
-tail -f /app/nohup_*.txt
+# wait on all
+wait

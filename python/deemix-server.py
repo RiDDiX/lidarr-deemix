@@ -29,7 +29,7 @@ def normalize_title(title: str) -> str:
 
 @app.route('/search/artists')
 def search_artists():
-    q = request.args.get('q')
+    q   = request.args.get('q')
     off = request.args.get('offset')
     lim = request.args.get('limit')
     return jsonify(dz.api.search_artist(query=q, index=off, limit=lim))
@@ -43,7 +43,7 @@ def artist(artist_id):
 
 @app.route('/search/albums')
 def search_albums():
-    q = request.args.get('q')
+    q   = request.args.get('q')
     off = request.args.get('offset')
     lim = request.args.get('limit')
     return jsonify(dz.api.search_album(query=q, index=off, limit=lim))
@@ -57,13 +57,11 @@ def album(album_id):
 def download(type, object_id, bitrate):
     br    = getBitrateNumberFromText(bitrate)
     track = generateDownloadObject(dz, f"https://www.deezer.com/us/{type}/{object_id}", br)
-
     album = track.album.get('title') if getattr(track, 'album', None) else track.toDict().get('trackname','')
     norm  = normalize_title(album)
     if norm in imported_albums:
         return jsonify({"status":"skipped","message":f"Album '{album}' bereits importiert"})
     imported_albums.add(norm)
-
     Downloader(dz, track, settings, listener).start()
     return jsonify(track.toDict())
 

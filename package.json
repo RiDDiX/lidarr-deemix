@@ -1,18 +1,18 @@
 {
   "name": "lidarr-deemix",
   "scripts": {
-    "start": "ts-node --project tsconfig.tsnode.json src/index.ts",
-    "dev":   "ts-node --project tsconfig.tsnode.json src/index.ts"
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "fastify": "^4.26.2",
     "node-fetch": "^2.7.0"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "ts-node": "11.0.0-beta.1",
     "@tsconfig/node20": "^20.1.4",
     "@types/node": "^20.12.3",
-    "@types/node-fetch": "^2.6.11"
+    "@types/node-fetch": "^2.6.11",
+    "ts-node": "11.0.0-beta.1",
+    "typescript": "^5.0.0"
   }
 }
