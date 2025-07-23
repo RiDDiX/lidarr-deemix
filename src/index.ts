@@ -1,11 +1,13 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import { searchLidarr } from './lidarr';
 import { searchDeemix } from './deemix';
 import { deduplicateArtists } from './helpers';
 
 const app = express();
 
-app.get('/api/v1/search', async (req, res) => {
+app.get(
+  '/api/v1/search',
+  async (req: Request, res: Response): Promise<void> => {
   const term = String(req.query.term || '');
   let lidarr: any[] = [];
   let deezer: any[] = [];

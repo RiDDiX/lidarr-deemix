@@ -1,23 +1,23 @@
 FROM python:3.12-alpine
-
 WORKDIR /app
 
-# Alpine‑Packages für Node, Build‑Tools und libffi
-RUN apk add --no-cache \
-      nodejs npm curl \
-      rust cargo build-base \
-      openssl-dev bsd-compat-headers bash \
-      libffi-dev pkgconfig
+# … apk add … libffi-dev pkgconfig …
 
-# Python‑Requirements
-COPY python/requirements.txt ./python/requirements.txt
+# Python requirements
+COPY python/requirements.txt ./python/
 RUN python -m pip install --upgrade pip \
  && python -m pip install -r python/requirements.txt
 
-# Node‑Env
+# Node environment
 RUN npm i -g pnpm
+
+# Install package.json deps plus express/axios & types
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm i
+RUN pnpm add express axios \
+ && pnpm add -D @types/express @types/node \
+ && pnpm install
+
+# Copy source + build
 COPY . .
 RUN pnpm run build
 
