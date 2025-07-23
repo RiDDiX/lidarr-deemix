@@ -1,38 +1,39 @@
-#######################################
-# 1) Node‑Builder Stage
-#######################################
-FROM node:18-alpine AS node-builder
+FROM python:3.12-alpine
 
 WORKDIR /app
+
+# Installiere grundlegende Build-Tools und Bibliotheken
+RUN apk add --no-cache \
+    nodejs \
+    npm \
+    curl \
+    rust \
+    cargo \
+    build-base \
+    openssl-dev \
+    bsd-compat-headers \
+    bash \
+    gcc \
+    musl-dev \
+    libffi-dev
+
+# Kopiere die requirements.txt in den Container
+COPY python/requirements.txt ./python/requirements.txt
+
+# Upgrade pip und installiere Python-Abhängigkeiten ohne Cache
+RUN python -m pip install --upgrade pip && \
+    python -m pip install --no-cache-dir -r python/requirements.txt
+
+# Installiere pnpm global
+RUN npm i -g pnpm
+
+# Kopiere package.json und pnpm-lock.yaml und installiere Node-Abhängigkeiten
 COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm@8 \
-  && pnpm install --no-frozen-lockfile \
-  && pnpm run build
+RUN pnpm i
 
-#######################################
-# 2) Python‑Builder Stage (unchanged)
-#######################################
-FROM python:3.12-slim AS python-builder
-# … wie gehabt …
+# Kopiere den restlichen Quellcode in den Container
+COPY . .
 
-#######################################
-# 3) Final Runtime Stage
-#######################################
-FROM debian:bookworm-slim AS runtime
-
-# … deine Runtime‑Schritte …
-
-# **WICHTIG**: Hier FROM‑Angaben anpassen
-COPY --from=node-builder /app/dist    ./dist
-COPY --from=node-builder /app/node_modules ./node_modules
-COPY --from=node-builder /app/package.json  ./package.json
-
-# 6) Dein Start‑Skript
-COPY run.sh .
-RUN chmod +x run.sh
-
-# Ports
 EXPOSE 8080
 
-# EntryPoint
-CMD ["./run.sh"]
+CMD ["/app/run.sh"]
