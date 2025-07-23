@@ -1,25 +1,41 @@
-FROM python:3.12-alpine
+# Base image: Debian slim with Python 3.12
+FROM python:3.12-slim
+
+# Set working directory
 WORKDIR /app
 
-# … apk add … libffi-dev pkgconfig …
+# System dependencies: build tools, libffi, pkg-config, SSL, curl, bash
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential \
+      libffi-dev \
+      pkg-config \
+      libssl-dev \
+      curl \
+      bash \
+ && rm -rf /var/lib/apt/lists/*
 
-# Python requirements
+# Copy and install Python requirements
 COPY python/requirements.txt ./python/
 RUN python -m pip install --upgrade pip \
  && python -m pip install -r python/requirements.txt
 
-# Node environment
-RUN npm i -g pnpm
+# Install pnpm globally
+RUN npm install -g pnpm
 
-# Install package.json deps plus express/axios & types
+# Copy Node project manifests and install dependencies
 COPY package.json pnpm-lock.yaml ./
+# Add Express & Axios and their types, then install all deps
 RUN pnpm add express axios \
  && pnpm add -D @types/express @types/node \
  && pnpm install
 
-# Copy source + build
+# Copy remaining source code and build
 COPY . .
 RUN pnpm run build
 
+# Expose the application port
 EXPOSE 8080
+
+# Default startup script
 CMD ["/app/run.sh"]
