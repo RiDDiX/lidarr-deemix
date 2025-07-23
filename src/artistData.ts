@@ -1,8 +1,8 @@
 export interface ArtistData {
   id: number;
   name: string;
-  albums: any[];      // Hier kannst du den Typ noch genauer definieren
-  images?: any[];     // Optionales Feld für Bilder
+  albums: any[];
+  images?: any[];
 }
 
 export function getArtistData(name: string): ArtistData {

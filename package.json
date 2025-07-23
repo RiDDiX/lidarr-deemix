@@ -2,29 +2,22 @@
   "name": "lidarr-deemix",
   "type": "module",
   "scripts": {
-    "start": "tsc && ts-node --project tsconfig.tsnode.json dist/index",
-    "dev": "tsc-watch --onSuccess \"node ./dist/index.js\"",
-    "dev:override": "OVERRIDE_MB=true tsc-watch --onSuccess \"node ./dist/index.js\"",
-    "dev:prio": "PRIO_DEEMIX=true tsc-watch --onSuccess \" node ./dist/index.js\""
+    "start": "ts-node --project tsconfig.tsnode.json src/index.ts",
+    "dev":   "tsc-watch --onSuccess \"node ./dist/index.js\""
+  },
+  "dependencies": {
+    "fastify": "^4.29.1",
+    "node-fetch": "^2.7.0",
+    "dotenv": "^16.4.5",
+    "lodash": "^4.17.21",
+    "latinize": "^2.0.0"
   },
   "devDependencies": {
     "@tsconfig/node20": "^20.1.6",
-    "@tsconfig/strictest": "^2.0.5",
-    "@types/latinize": "^0.2.18",
-    "@types/node": "^20.19.9"
-  },
-  "peerDependencies": {
-    "typescript": "^5.8.3"
-  },
-  "dependencies": {
-    "@types/lodash": "^4.17.0",
+    "@types/node": "^20.19.9",
     "@types/node-fetch": "^2.6.12",
-    "dotenv": "^16.4.5",
-    "fastify": "^4.29.1",
-    "latinize": "^2.0.0",
-    "lodash": "^4.17.21",
-    "node-fetch": "^2.7.0",
     "ts-node": "11.0.0-beta.1",
+    "typescript": "^5.8.3",
     "tsc-watch": "^6.2.0"
   }
 }

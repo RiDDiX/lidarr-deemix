@@ -1,8 +1,12 @@
 {
+  "extends": "./tsconfig.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src"
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "noImplicitAny": false
   },
-  "files": ["./deemix.ts", "./index.ts", "./lidarr.ts"],
-  "include": ["./*.ts"]
+  "include": ["src/**/*.ts"]
 }

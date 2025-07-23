@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import { ArtistData, getArtistData } from './artistData.js';
 
 export interface Artist { name: string; [key: string]: any }
 
@@ -19,4 +20,18 @@ export async function searchMusicbrainz(
   if (!res.ok) return [];
   const data = await res.json();
   return data.artists || [];
+}
+
+export async function getArtistFromMB(id: string): Promise<any> {
+  const url = `${BASE}/artist/${encodeURIComponent(id)}`;
+  const res = await fetch(url, { timeout: 5000 });
+  if (!res.ok) throw new Error('MB artist failed');
+  return res.json();
+}
+
+export async function getAlbumFromMB(id: string): Promise<any> {
+  const url = `${BASE}/album/${encodeURIComponent(id)}`;
+  const res = await fetch(url, { timeout: 5000 });
+  if (!res.ok) throw new Error('MB album failed');
+  return res.json();
 }
