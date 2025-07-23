@@ -1,10 +1,10 @@
-# Base image: Debian slim with Python 3.12
+# Basis-Image
 FROM python:3.12-slim
 
-# Set working directory
+# Arbeitsverzeichnis
 WORKDIR /app
 
-# System dependencies: build tools, libffi, pkg-config, SSL, curl, bash
+# System‑Packages (inkl. Node.js und npm für pnpm)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       build-essential \
@@ -13,29 +13,26 @@ RUN apt-get update \
       libssl-dev \
       curl \
       bash \
+      nodejs \
+      npm \
  && rm -rf /var/lib/apt/lists/*
 
-# Copy and install Python requirements
-COPY python/requirements.txt ./python/
+# Python‑Abhängigkeiten installieren
+COPY python/requirements.txt ./python/requirements.txt
 RUN python -m pip install --upgrade pip \
  && python -m pip install -r python/requirements.txt
 
-# Install pnpm globally
+# pnpm global installieren
 RUN npm install -g pnpm
 
-# Copy Node project manifests and install dependencies
+# Node‑Projekt‑Manifeste und Abhängigkeiten
 COPY package.json pnpm-lock.yaml ./
-# Add Express & Axios and their types, then install all deps
-RUN pnpm add express axios \
- && pnpm add -D @types/express @types/node \
- && pnpm install
+RUN pnpm install --frozen-lockfile
 
-# Copy remaining source code and build
+# Rest des Projekts kopieren und bauen
 COPY . .
 RUN pnpm run build
 
-# Expose the application port
+# Ports und Startbefehl
 EXPOSE 8080
-
-# Default startup script
-CMD ["/app/run.sh"]
+CMD ["bash", "/app/run.sh"]
