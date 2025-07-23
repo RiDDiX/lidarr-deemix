@@ -1,12 +1,18 @@
-FROM python:3.12-alpine
+FROM python:alpine
 
 WORKDIR /app
+
+# Systemtools + Build Deps + libffi-dev!
 RUN apk add --no-cache nodejs npm curl rust cargo build-base openssl-dev bsd-compat-headers bash libffi-dev
+
 COPY python/requirements.txt ./python/requirements.txt
 RUN python -m pip install -r python/requirements.txt
-RUN npm i -g pnpm
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm i
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
 COPY . .
-EXPOSE 8080
-CMD ["/app/run.sh"]
+
+RUN npm run build
+
+CMD ["node", "dist/index.js"]
