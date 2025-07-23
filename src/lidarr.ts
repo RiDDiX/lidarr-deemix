@@ -1,15 +1,14 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { searchDeezerArtist } from './deemix';
+import { searchDeezerArtist } from './deemix.js';
 
 export async function handleLidarrRequest(
   request: FastifyRequest<{ Params: { artist: string } }>,
   reply: FastifyReply
 ) {
-  const artist = request.params.artist;
   try {
-    const results = await searchDeezerArtist(artist);
+    const results = await searchDeezerArtist(request.params.artist);
     reply.send(results);
-  } catch (err) {
-    reply.code(500).send({ error: 'Failed to search Deezer', detail: err });
+  } catch (e) {
+    reply.status(500).send({ error: 'Failed to query Deezer' });
   }
 }
