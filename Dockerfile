@@ -1,4 +1,4 @@
-FROM python:alpine
+FROM python:3.12-alpine
 
 WORKDIR /app
 RUN apk add --no-cache nodejs npm curl rust cargo build-base openssl-dev bsd-compat-headers bash libffi-dev
