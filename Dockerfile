@@ -1,39 +1,44 @@
+# 1) Basis-Image mit Python + Alpine
 FROM python:3.12-alpine
 
+# 2) Arbeitsverzeichnis
 WORKDIR /app
 
-# Installiere grundlegende Build-Tools und Bibliotheken
+# 3) System‑Pakete installieren
 RUN apk add --no-cache \
     nodejs \
     npm \
+    bash \
     curl \
-    rust \
-    cargo \
     build-base \
     openssl-dev \
-    bsd-compat-headers \
-    bash \
-    gcc \
-    musl-dev \
     libffi-dev
 
-# Kopiere die requirements.txt in den Container
-COPY python/requirements.txt ./python/requirements.txt
+# 4) Python‑Dependencies
+COPY python/requirements.txt python/requirements.txt
+RUN python -m pip install --upgrade pip \
+ && python -m pip install --no-cache-dir -r python/requirements.txt
 
-# Upgrade pip und installiere Python-Abhängigkeiten ohne Cache
-RUN python -m pip install --upgrade pip && \
-    python -m pip install --no-cache-dir -r python/requirements.txt
-
-# Installiere pnpm global
-RUN npm i -g pnpm
-
-# Kopiere package.json und pnpm-lock.yaml und installiere Node-Abhängigkeiten
+# 5) pnpm installieren und Node‑Dependencies
+RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm i
+RUN pnpm install
 
-# Kopiere den restlichen Quellcode in den Container
+# 6) Quellcode kopieren
 COPY . .
 
-EXPOSE 8080
+# 7) TypeScript bauen (für pnpm run start)
+#    Hier muss dein "build"-Script in package.json existieren, z.B. "build": "tsc"
+RUN pnpm build
 
-CMD ["/app/run.sh"]
+# 8) run.sh ausführbar machen
+RUN chmod +x ./run.sh
+
+# 9) Ports freigeben
+#    7272 = Python/Deemix-Server
+#    8080 = Node/TS-Proxy
+#    8081 = ggf. mitmdump (je nach Konfiguration)
+EXPOSE 7272 8080 8081
+
+# 10) Default EntryPoint
+CMD ["./run.sh"]

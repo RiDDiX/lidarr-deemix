@@ -1,8 +1,8 @@
 {
+  "extends": "./tsconfig.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./src"
+    "module": "commonjs",
+    "moduleResolution": "node"
   },
-  "files": ["artistData.ts", "src/deemix.ts", "src/index.ts", "src/lidarr.ts"],
-  "include": ["./*.ts", "src/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }
