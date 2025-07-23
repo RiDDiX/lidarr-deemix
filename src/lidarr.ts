@@ -1,14 +1,12 @@
-import { FastifyRequest, FastifyReply } from 'fastify';
-import { searchDeezerArtist } from './deemix.js';
+import axios from 'axios';
 
-export async function handleLidarrRequest(
-  request: FastifyRequest<{ Params: { artist: string } }>,
-  reply: FastifyReply
-) {
-  try {
-    const results = await searchDeezerArtist(request.params.artist);
-    reply.send(results);
-  } catch (e) {
-    reply.status(500).send({ error: 'Failed to query Deezer' });
-  }
+const URL = process.env.LIDARR_API_URL || 'http://lidarr:8686/api/v1';
+
+export async function searchLidarr(term: string): Promise<any[]> {
+  const resp = await axios.get(`${URL}/search`, {
+    params: { term, type: 'artist' },
+    timeout: 2000,
+  });
+  // Lidarr liefert { artists: [...] }
+  return resp.data.artists || [];
 }

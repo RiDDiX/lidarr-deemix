@@ -1,18 +1,36 @@
-import * as dotenv from 'dotenv';
-dotenv.config();
+import express from 'express';
+import { searchLidarr } from './lidarr';
+import { searchDeemix } from './deemix';
+import { deduplicateArtists } from './helpers';
 
-import fastify from 'fastify';
-import { handleLidarrRequest } from './lidarr.js';
+const app = express();
 
-const app = fastify();
+app.get('/api/v1/search', async (req, res) => {
+  const term = String(req.query.term || '');
+  let lidarr: any[] = [];
+  let deezer: any[] = [];
 
-app.get('/api/lidarr/:artist', handleLidarrRequest);
+  // Parallel requests with failover
+  await Promise.all([
+    (async () => {
+      try {
+        lidarr = await searchLidarr(term);
+      } catch {
+        lidarr = [];
+      }
+    })(),
+    (async () => {
+      try {
+        deezer = await searchDeemix(term);
+      } catch {
+        deezer = [];
+      }
+    })(),
+  ]);
 
-const PORT = process.env.PORT || 8080;
-app.listen({ port: Number(PORT), host: '0.0.0.0' }, (err, address) => {
-  if (err) {
-    app.log.error(err);
-    process.exit(1);
-  }
-  console.log(`Server running at ${address}`);
+  const merged = deduplicateArtists(lidarr, deezer);
+  res.json({ results: merged });
 });
+
+const PORT = Number(process.env.PORT) || 3000;
+app.listen(PORT, () => console.log(`API läuft auf Port ${PORT}`));
