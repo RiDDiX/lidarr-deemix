@@ -1,56 +1,38 @@
 import fetch from "node-fetch";
 
-const deemixApi = "https://api.deezer.com";
+const baseUrl = "https://api.deezer.com";
 
-export async function deemixSearch(query: string) {
-  const url = `${deemixApi}/search/artist?q=${encodeURIComponent(query)}`;
-  const res = await fetch(url);
-  const data = await res.json();
-
-  return (data.data || []).map((a: any) => ({
-    Id: `dz-${a.id}`,
-    Name: a.name,
-    Type: "artist",
-    Images: [{ Url: a.picture_medium }],
-    Overview: `Deezer fallback result for "${a.name}"`,
-  }));
+export async function deemixSearch(query: string): Promise<any[]> {
+  try {
+    const res = await fetch(`${baseUrl}/search?q=${encodeURIComponent(query)}`);
+    const json = await res.json();
+    return json?.data || [];
+  } catch (err) {
+    console.error("deemixSearch error:", err);
+    return [];
+  }
 }
 
-export async function deemixArtist(id: string) {
-  const res = await fetch(`${deemixApi}/artist/${id}`);
-  const data = await res.json();
-
-  const albumsRes = await fetch(`${deemixApi}/artist/${id}/albums`);
-  const albumsData = await albumsRes.json();
-
-  return {
-    Id: `dz-${data.id}`,
-    Name: data.name,
-    Type: "artist",
-    Images: [{ Url: data.picture_medium }],
-    Overview: `Imported from Deezer`,
-    Albums: (albumsData.data || []).map((a: any) => ({
-      Id: `dz-${a.id}`,
-      Title: a.title,
-      ReleaseDate: a.release_date,
-      Images: [{ Url: a.cover_medium }],
-    })),
-  };
+export async function deemixArtist(id: string): Promise<any> {
+  try {
+    const res = await fetch(`${baseUrl}/artist/${id}`);
+    const artist = await res.json();
+    const albumsRes = await fetch(`${baseUrl}/artist/${id}/albums`);
+    const albumsJson = await albumsRes.json();
+    artist.Albums = albumsJson?.data || [];
+    return artist;
+  } catch (err) {
+    console.error("deemixArtist error:", err);
+    return null;
+  }
 }
 
-export async function deemixAlbum(id: string) {
-  const res = await fetch(`${deemixApi}/album/${id}`);
-  const data = await res.json();
-
-  return {
-    Id: `dz-${data.id}`,
-    Title: data.title,
-    ReleaseDate: data.release_date,
-    Images: [{ Url: data.cover_medium }],
-    Tracks: (data.tracks.data || []).map((t: any) => ({
-      TrackNumber: t.track_position,
-      Title: t.title,
-      Duration: t.duration,
-    })),
-  };
+export async function getAlbum(id: string): Promise<any> {
+  try {
+    const res = await fetch(`${baseUrl}/album/${id}`);
+    return await res.json();
+  } catch (err) {
+    console.error("getAlbum error:", err);
+    return null;
+  }
 }

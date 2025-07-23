@@ -1,13 +1,14 @@
 export function removeKeys(obj: any, keys: string[]): any {
   if (Array.isArray(obj)) {
-    return obj.map((v) => removeKeys(v, keys));
+    return obj.map(item => removeKeys(item, keys));
   } else if (typeof obj === "object" && obj !== null) {
-    return Object.keys(obj).reduce((acc, key) => {
+    const newObj: any = {};
+    Object.entries(obj).forEach(([key, value]) => {
       if (!keys.includes(key)) {
-        acc[key] = removeKeys(obj[key], keys);
+        newObj[key] = removeKeys(value, keys);
       }
-      return acc;
-    }, {} as any);
+    });
+    return newObj;
   }
   return obj;
 }
