@@ -1,158 +1,77 @@
 import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
-import _ from "lodash";
 import dotenv from "dotenv";
-import { search, getArtist, getAlbum, deemixArtist, deemixSearch } from "./deemix.js";
-import { removeKeys } from "./helpers.js";
+import { deemixSearch, getArtist as getDeemixArtist, getAlbum } from "./deemix.js";
 import { getArtistData } from "./artistData.js";
+import { removeKeys } from "./helpers.js";
 
 dotenv.config();
 
 const lidarrApiUrl = "https://api.lidarr.audio";
-const scrobblerApiUrl = "https://ws.audioscrobbler.com";
-
-const fastify = Fastify({
-  logger: { level: "error" },
-});
+const fastify = Fastify({ logger: { level: "error" } });
 
 fastify.setErrorHandler((error, request, reply) => {
   console.error("Error:", error);
   reply.status(500).send({ error: "Internal Server Error", message: error.message });
 });
 
-async function doScrobbler(req: FastifyRequest, res: FastifyReply) {
-  const headers = req.headers;
-  const u = new URL(`http://localhost${req.url}`);
+async function proxyLidarr(req: FastifyRequest, res: FastifyReply) {
+  const url = new URL(`http://localhost${req.url}`);
+  const headers = Object.fromEntries(Object.entries(req.headers).filter(([k]) => !["host", "connection"].includes(k)));
   const method = req.method;
-  const nh: { [key: string]: any } = {};
-  Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") nh[key] = value;
+  const body = req.body ? JSON.stringify(req.body) : undefined;
+
+  const fetchRes = await fetch(`${lidarrApiUrl}${url.pathname}${url.search}`, {
+    method,
+    headers,
+    body,
   });
 
-  const url = `${u.pathname}${u.search}`;
-  let status = 200;
-  let data;
+  const contentType = fetchRes.headers.get("content-type");
+  const result = contentType?.includes("json") ? await fetchRes.json() : await fetchRes.text();
+  res.status(fetchRes.status);
+  fetchRes.headers.forEach((v, k) => res.header(k, v));
 
-  try {
-    const fetchOpts: any = { method, headers: nh };
-    if (method !== "GET" && method !== "HEAD" && req.body) {
-      fetchOpts.body = typeof req.body === "object" ? JSON.stringify(req.body) : req.body.toString();
+  // /search endpoint erweitern
+  if (url.pathname.includes("/search") && process.env.FALLBACK_DEEZER === "true") {
+    const queryParam = url.searchParams.get("query") || "";
+    const fromLidarr = Array.isArray(result) ? result : [];
+    const fromDeemix = await deemixSearch(queryParam);
+    const merged = [...fromLidarr, ...fromDeemix];
+    return merged;
+  }
+
+  // /artist fallback
+  if (url.pathname.includes("/artist/")) {
+    const queryParam = url.searchParams.get("query") || "";
+    const mb = await getArtistData(queryParam);
+    if (mb?.Albums?.length) return mb;
+
+    if (url.pathname.includes("-aaaa-")) {
+      const id = url.pathname.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
+      const deemixArtist = id ? await getDeemixArtist(id) : null;
+      return deemixArtist ?? res.status(404).send({ error: "Not found" });
     }
-    data = await fetch(`${scrobblerApiUrl}${url}`, fetchOpts);
-    status = data.status;
-  } catch (e) {
-    console.error(e);
+
+    return await getDeemixArtist(queryParam);
   }
 
-  res.statusCode = status;
-  res.headers = data?.headers as any;
-  let json = null;
-  try {
-    json = await data?.json();
-  } catch {}
-
-  if (process.env.OVERRIDE_MB === "true") {
-    json = removeKeys(json, ["mbid"]);
+  // /album fallback
+  if (url.pathname.includes("/album/") && url.pathname.includes("-bbbb-")) {
+    const id = url.pathname.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
+    const album = id ? await getAlbum(id) : null;
+    return album ?? res.status(404).send({ error: "Not found" });
   }
-  return { newres: res, data: json };
+
+  return result;
 }
 
-async function doApi(req: FastifyRequest, res: FastifyReply) {
-  const headers = req.headers;
-  const u = new URL(`http://localhost${req.url}`);
-  const method = req.method;
-  const nh: { [key: string]: any } = {};
-  Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") nh[key] = value;
-  });
-
-  const url = `${u.pathname}${u.search}`;
-  let status = 200;
-  const fetchOpts: any = { method, headers: nh };
-
-  if (method !== "GET" && method !== "HEAD" && req.body) {
-    fetchOpts.body = typeof req.body === "object" ? JSON.stringify(req.body) : req.body.toString();
-    if (!fetchOpts.headers["content-type"]) {
-      fetchOpts.headers["content-type"] = "application/json";
-    }
-  }
-
-  let data;
-  try {
-    data = await fetch(`${lidarrApiUrl}${url}`, fetchOpts);
-    status = data.status;
-  } catch (e) {
-    console.error("Fehler beim Abruf von Lidarr API:", e);
-  }
-
-  let lidarr: any = null;
-  try {
-    const text = await data?.text();
-    lidarr = JSON.parse(text);
-  } catch (e) {
-    console.warn("Antwort war kein JSON, Deezer-Fallback wird verwendet (wenn erlaubt)");
-  }
-
-  // Erweiterte Verarbeitung
-  if (url.includes("/v0.4/search")) {
-    const queryParam = u.searchParams.get("query") || "";
-    lidarr = await search(lidarr, queryParam, url.includes("type=all"));
-
-    if ((!lidarr?.entries || lidarr.entries.length === 0) && process.env.FALLBACK_DEEZER === "true") {
-      console.log("Lidarr leer – Deezer-Fallback aktiv");
-      lidarr = await deemixSearch(queryParam);
-      status = lidarr ? 200 : 404;
-    }
-  }
-
-  if (url.includes("/v0.4/artist/")) {
-    const queryParam = u.searchParams.get("query") || "";
-    const mbArtist = await getArtistData(queryParam);
-    if (mbArtist?.Albums?.length > 0) {
-      lidarr = mbArtist;
-    } else {
-      if (url.includes("-aaaa-")) {
-        const id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
-        lidarr = id ? await deemixArtist(id) : null;
-        status = lidarr ? 200 : 404;
-      } else {
-        lidarr = await deemixArtist(queryParam);
-      }
-    }
-  }
-
-  if (url.includes("/v0.4/album/") && url.includes("-bbbb-")) {
-    const id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
-    lidarr = id ? await getAlbum(id) : null;
-    status = lidarr ? 200 : 404;
-  }
-
-  data?.headers?.delete("content-encoding");
-
-  console.log(status, method, url);
-  res.statusCode = status;
-  res.headers = data?.headers as any;
-  return { newres: res, data: lidarr };
-}
-
-// Routing
-fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
-  const host = req.headers["x-proxy-host"];
-  if (host === "ws.audioscrobbler.com") {
-    const { data } = await doScrobbler(req, res);
-    return data;
-  }
-  const { data } = await doApi(req, res);
-  return data;
-});
+fastify.get("*", proxyLidarr);
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
   if (err) {
     console.error(err);
     process.exit(1);
   }
-  console.log("Lidarr++Deemix running at " + address);
-  if (process.env.OVERRIDE_MB === "true") {
-    console.log("Overriding MusicBrainz API with Deemix API");
-  }
+  console.log(`Lidarr++Deemix läuft auf ${address}`);
 });
