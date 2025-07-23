@@ -1,38 +1,24 @@
-FROM python:3.12-alpine
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# 1) System‑Deps: Python/C build tools + Node.js
-RUN apk add --no-cache \
-    nodejs \
-    npm \
-    bash \
-    curl \
-    build-base \
-    openssl-dev \
-    libffi-dev \
-    pkgconf \
-    python3-dev
+RUN apk add --no-cache build-base python3-dev
 
-# 2) Python‑Deps
-COPY python/requirements.txt python/requirements.txt
-RUN python -m pip install --upgrade pip \
- && python -m pip install --no-cache-dir -r python/requirements.txt
-
-# 3) pnpm & Node‑Deps
-RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml ./
+RUN npm install -g pnpm
 RUN pnpm install
 
-# 4) Copy all code & build TS
 COPY . .
-RUN pnpm run build
+RUN pnpm build
 
-# 5) Make entrypoint executable
-RUN chmod +x ./run.sh
+FROM node:20-alpine
 
-# 6) Expose ports
-EXPOSE 8080
+WORKDIR /app
 
-# 7) Start all services
-CMD ["./run.sh"]
+# nur Runtime‑Abhängigkeiten
+COPY --from=builder /app/package.json /app/dist /app/node_modules ./
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+CMD ["node", "dist/index.js"]

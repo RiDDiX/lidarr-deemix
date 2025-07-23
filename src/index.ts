@@ -1,47 +1,46 @@
-import Fastify, { FastifyRequest, FastifyReply } from 'fastify';
-import { searchMusicbrainz } from './lidarr.js';
-import { searchDeemix, Artist } from './deemix.js';
-import { mergeArtists } from './helpers.js';
+import Fastify from 'fastify'
+import dotenv from 'dotenv'
+import * as lidarr from './lidarr'
+import * as deemix from './deemix'
 
-const app = Fastify();
+dotenv.config()
+const server = Fastify({ logger: true })
 
-app.get('/api/v0.4/search', async (req: FastifyRequest, reply: FastifyReply) => {
-  const q    = (req.query as any).query as string;
-  const offs = parseInt((req.query as any).offset) || undefined;
-  const lim  = parseInt((req.query as any).limit)  || undefined;
-  if (!q) return reply.status(400).send({ error: 'query ist erforderlich' });
+// Gemeinsamer Search-Endpunkt
+server.get('/api/v0.4/search', async (req, reply) => {
+  const { query = '', limit = '100', offset = '0' } = (req.query as any)
 
-  const mb = await searchMusicbrainz(q, offs, lim);
-  const dz = await searchDeemix(q, offs, lim);
-  return reply.send(mergeArtists(mb, dz));
-});
-
-app.get('/api/v0.4/artist/:id', async (req, reply) => {
-  const id = encodeURIComponent((req.params as any).id as string);
-  // Lidarr API
+  // 1) Offizielle Lidarr-Suche
+  let lidarrRes: any = null
   try {
-    const res = await fetch(`https://api.lidarr.audio/api/v0.4/artist/${id}`,{ timeout:5000 });
-    if (res.ok) return reply.send(await res.json());
-  } catch {}
-  // Fallback Deemix
-  try {
-    const res = await fetch(`http://127.0.0.1:7272/artists/${id}`,{ timeout:5000 });
-    if (res.ok) return reply.send(await res.json());
-  } catch {}
-  return reply.status(502).send({ error: 'Artist nicht verfügbar' });
-});
+    lidarrRes = await lidarr.searchLidarr(query, limit, offset)
+  } catch (err) {
+    server.log.warn(`Lidarr failed: ${(err as Error).message}`)
+  }
 
-app.get('/api/v0.4/album/:id', async (req, reply) => {
-  const id = encodeURIComponent((req.params as any).id as string);
+  // 2) Immer Deezer/Deemix dazu (Fallback oder Ergänzung)
+  let deemixRes: any = null
   try {
-    const res = await fetch(`https://api.lidarr.audio/api/v0.4/album/${id}`,{ timeout:5000 });
-    if (res.ok) return reply.send(await res.json());
-  } catch {}
-  try {
-    const res = await fetch(`http://127.0.0.1:7272/albums/${id}`,{ timeout:5000 });
-    if (res.ok) return reply.send(await res.json());
-  } catch {}
-  return reply.status(502).send({ error: 'Album nicht verfügbar' });
-});
+    deemixRes = await deemix.searchDeemix(query, limit, offset)
+  } catch (err) {
+    server.log.warn(`Deemix failed: ${(err as Error).message}`)
+  }
 
-app.listen({ port: 8080 }, err => { if(err) throw err; console.log('Proxy on 8080'); });
+  return { lidarr: lidarrRes, deemix: deemixRes }
+})
+
+// Beispiel: Einzel‑Artist holen
+server.get('/api/v0.4/artist/:id', async (req, reply) => {
+  const id = (req.params as any).id
+  // Versuch Lidarr
+  try {
+    return await lidarr.getArtistLidarr(id)
+  } catch {
+    // dann Deezer
+    return await deemix.getArtistDeemix(id)
+  }
+})
+
+const port = Number(process.env.PORT || 3000)
+server.listen({ port, host: '0.0.0.0' })
+  .then(() => server.log.info(`listening on ${port}`))

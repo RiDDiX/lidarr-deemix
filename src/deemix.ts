@@ -1,24 +1,25 @@
-import fetch from 'node-fetch';
+import { fetchWithTimeout, buildQuery } from './helpers'
 
-export interface Artist { name: string; [key: string]: any }
-
-const BASE = process.env.DEEMIX_API_BASE || 'http://127.0.0.1:7272';
+const BASE = process.env.DEEMIX_URL || 'http://127.0.0.1:7171'
 
 export async function searchDeemix(
   query: string,
-  offset?: number,
-  limit?: number
-): Promise<Artist[]> {
-  const url = new URL(`${BASE}/search/artists`);
-  url.searchParams.set('q', query);
-  if (offset != null) url.searchParams.set('offset', offset.toString());
-  if (limit  != null) url.searchParams.set('limit',  limit.toString());
+  limit = '100',
+  offset = '0'
+): Promise<any> {
+  // hier liefern wir nur Artists als Beispiel
+  const qs = buildQuery({ q: query, limit, offset })
+  const res = await fetchWithTimeout(`${BASE}/search/artists?${qs}`, {
+    method: 'GET'
+  })
+  if (!res.ok) throw new Error(`Deemix search ${res.status}`)
+  return res.json()
+}
 
-  try {
-    const res = await fetch(url.toString(), { timeout: 5000 });
-    if (!res.ok) return [];
-    return await res.json();
-  } catch {
-    return [];
-  }
+export async function getArtistDeemix(artistId: string): Promise<any> {
+  const res = await fetchWithTimeout(`${BASE}/artists/${artistId}`, {
+    method: 'GET'
+  })
+  if (!res.ok) throw new Error(`Deemix getArtist ${res.status}`)
+  return res.json()
 }

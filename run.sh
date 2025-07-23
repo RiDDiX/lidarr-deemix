@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-set -e
+# 1) Deemix‑Server (Python)
+nohup python3 ./python/deemix-server.py > nohup_deemix.txt 2>&1 &
+# 2) TypeScript‑Proxy
+nohup npm start > nohup_server.txt 2>&1 &
+# 3) mitmproxy
+nohup mitmdump -s ./python/http-redirect-request.py > nohup_mitm.txt 2>&1 &
 
-# Start Deemix Python API
-python python/deemix-server.py &
-
-# Start Node/TS proxy (original index.ts)
-ts-node --project tsconfig.tsnode.json src/index.ts &
-
-# Start mitmdump on 7171
-mitmdump -s python/http-redirect-request.py &
-
-wait
+tail -f nohup_*.txt

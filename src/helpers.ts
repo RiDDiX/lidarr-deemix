@@ -1,18 +1,30 @@
-export function normalizeTitle(title: string): string {
-  return title
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+import fetch, { RequestInit } from 'node-fetch'
+import { URLSearchParams } from 'url'
+
+/**
+ * Wrapper um fetch mit AbortController.
+ */
+export async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 5000
+): Promise<Response> {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(id)
+  }
 }
 
-export function mergeArtists<T extends { name: string }>(mb: T[], dz: T[]): T[] {
-  const seen = new Map<string, T>();
-  for (const artist of [...mb, ...dz]) {
-    const key = normalizeTitle(artist.name);
-    if (!seen.has(key)) seen.set(key, artist);
+/**
+ * Baut eine query-string aus einem Objekt.
+ */
+export function buildQuery(params: Record<string, string | undefined>): string {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined) qs.append(k, v)
   }
-  return Array.from(seen.values());
+  return qs.toString()
 }

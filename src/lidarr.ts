@@ -1,25 +1,26 @@
-import fetch from 'node-fetch';
-import { Artist } from './deemix.js';
+import { fetchWithTimeout, buildQuery } from './helpers'
 
-const BASE = process.env.LIDARR_API_BASE || 'https://api.lidarr.audio/api/v0.4';
+const BASE = 'https://api.lidarr.audio/api/v0.4'
 
-export async function searchMusicbrainz(
+export async function searchLidarr(
   query: string,
-  offset?: number,
-  limit?: number
-): Promise<Artist[]> {
-  const url = new URL(`${BASE}/search`);
-  url.searchParams.set('type', 'artist');
-  url.searchParams.set('query', query);
-  if (offset != null) url.searchParams.set('offset', offset.toString());
-  if (limit  != null) url.searchParams.set('limit',  limit.toString());
+  limit = '100',
+  offset = '0'
+): Promise<any> {
+  const qs = buildQuery({ type: 'all', query, limit, offset })
+  const res = await fetchWithTimeout(`${BASE}/search?${qs}`, {
+    method: 'GET',
+    headers: { 'Accept': 'application/json' }
+  })
+  if (!res.ok) throw new Error(`Lidarr search ${res.status}`)
+  return res.json()
+}
 
-  try {
-    const res = await fetch(url.toString(), { timeout: 5000 });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.artists || [];
-  } catch {
-    return [];
-  }
+export async function getArtistLidarr(artistId: string): Promise<any> {
+  const res = await fetchWithTimeout(`${BASE}/artist/${artistId}`, {
+    method: 'GET',
+    headers: { 'Accept': 'application/json' }
+  })
+  if (!res.ok) throw new Error(`Lidarr getArtist ${res.status}`)
+  return res.json()
 }

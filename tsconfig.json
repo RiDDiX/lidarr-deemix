@@ -1,9 +1,12 @@
 {
-  "$schema": "https://json.schemastore.org/tsconfig",
-  "extends": ["@tsconfig/node20/tsconfig.json"],
+  "extends": "@tsconfig/node20/tsconfig.json",
   "compilerOptions": {
+    "module": "Node16",
+    "moduleResolution": "Node16",
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./src",
+    "esModuleInterop": true,
+    "strict": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src"]
 }
