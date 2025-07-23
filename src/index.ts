@@ -1,58 +1,158 @@
-import Fastify, { FastifyRequest, FastifyReply } from 'fastify';
-import fetch from 'node-fetch';
-import { searchMusicbrainz, Artist as MBArtist } from './lidarr';
-import { searchDeemix, Artist as DZArtist }       from './deemix';
-import { mergeArtists }       from './helpers';
+import fetch from "node-fetch";
+import Fastify from "fastify";
+import _ from "lodash";
+import dotenv from "dotenv";
+import {
+  search,
+  getArtist,
+  getAlbum,
+  deemixArtist,
+  deemixAlbum,
+  deemixTracks,
+} from "./deemix.js";
+import { removeKeys } from "./helpers.js";
 
-const app = Fastify();
-const LIDARR_BASE = process.env.LIDARR_API_BASE || 'https://api.lidarr.audio/api/v0.4';
-const DEEMIX_BASE = process.env.DEEMIX_API_BASE || 'http://127.0.0.1:7272';
+const lidarrApiUrl = "https://api.lidarr.audio";
+const scrobblerApiUrl = "https://ws.audioscrobbler.com";
 
-app.get('/api/v0.4/search', async (req: FastifyRequest, reply: FastifyReply) => {
-  const q    = (req.query as any).query as string;
-  const offs = parseInt((req.query as any).offset) || undefined;
-  const lim  = parseInt((req.query as any).limit)  || undefined;
-  if (!q) return reply.status(400).send({ error: 'query ist erforderlich' });
+dotenv.config();
 
-  let mb: MBArtist[] = [];
-  let dz: DZArtist[] = [];
-  try { mb = await searchMusicbrainz(q, offs, lim) } catch { console.warn('MB offline') }
-  try { dz = await searchDeemix(q, offs, lim)       } catch { console.warn('Deemix offline') }
-
-  return reply.send(mergeArtists(mb, dz));
+const fastify = Fastify({
+  logger: {
+    level: "error",
+  },
 });
 
-app.get('/api/v0.4/artist/:id', async (req: FastifyRequest, reply: FastifyReply) => {
-  const id = (req.params as any).id as string;
-  try {
-    const res = await fetch(`${LIDARR_BASE}/artist/${id}`,{ timeout:5000 });
-    if (res.ok) return reply.send(await res.json());
-  } catch { console.warn(`Lidarr artist/${id} failed`) }
+async function doScrobbler(req: any, res: any) {
+  let headers = req.headers;
+  const u = new URL(`http://localhost${req.url}`);
+  const method = req.method;
 
+  const body = req.body?.toString();
+  let status = 200;
+
+  let nh: any = {};
+
+  Object.entries(headers).forEach(([key, value]) => {
+    if (key !== "host" && key !== "connection") {
+      nh[key] = value;
+    }
+  });
+  const url = `${u.pathname}${u.search}`;
+  let data: any;
   try {
-    const res = await fetch(`${DEEMIX_BASE}/artists/${id}`,{ timeout:5000 });
-    return reply.send(await res.json());
-  } catch {
-    return reply.status(502).send({ error: 'Artist nicht verfügbar' });
+    data = await fetch(`${scrobblerApiUrl}${url}`, {
+      method: method,
+      body: body,
+      headers: nh,
+    });
+    status = data.status;
+  } catch (e) {
+    console.error(e);
   }
-});
+  res.statusCode = status;
+  res.headers = data.headers;
+  let json = await data.json();
 
-app.get('/api/v0.4/album/:id', async (req: FastifyRequest, reply: FastifyReply) => {
-  const id = (req.params as any).id as string;
-  try {
-    const res = await fetch(`${LIDARR_BASE}/album/${id}`,{ timeout:5000 });
-    if (res.ok) return reply.send(await res.json());
-  } catch { console.warn(`Lidarr album/${id} failed`) }
-
-  try {
-    const res = await fetch(`${DEEMIX_BASE}/albums/${id}`,{ timeout:5000 });
-    return reply.send(await res.json());
-  } catch {
-    return reply.status(502).send({ error: 'Album nicht verfügbar' });
+  if (process.env.OVERRIDE_MB === "true") {
+    json = removeKeys(json, "mbid");
   }
+
+  return { newres: res, data: json };
+}
+
+async function doApi(req: any, res: any) {
+  let headers = req.headers;
+  const u = new URL(`http://localhost${req.url}`);
+  const method = req.method;
+
+  const body = req.body?.toString();
+  let status = 200;
+
+  let nh: any = {};
+
+  Object.entries(headers).forEach(([key, value]) => {
+    if (key !== "host" && key !== "connection") {
+      nh[key] = value;
+    }
+  });
+
+  const url = `${u.pathname}${u.search}`;
+  let data: any;
+  try {
+    data = await fetch(`${lidarrApiUrl}${url}`, {
+      method: method,
+      body: body,
+      headers: nh,
+    });
+    status = data.status;
+  } catch (e) {
+    console.error(e);
+  }
+
+  let lidarr: any;
+  try {
+    lidarr = await data.json();
+  } catch (e) {
+    console.error(e);
+  }
+  if (url.includes("/v0.4/search")) {
+    lidarr = await search(
+      lidarr,
+      u.searchParams.get("query") as string,
+      url.includes("type=all")
+    );
+  }
+
+  if (url.includes("/v0.4/artist/")) {
+    if (url.includes("-aaaa-")) {
+      let id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
+      lidarr = await deemixArtist(id!);
+      status = lidarr === null ? 404 : 200;
+    } else {
+      lidarr = await getArtist(lidarr);
+      if (process.env.OVERRIDE_MB === "true") {
+        // prevent refetching from musicbrainz
+        status = 404;
+        lidarr = {};
+      }
+    }
+  }
+  if (url.includes("/v0.4/album/")) {
+    if (url.includes("-bbbb-")) {
+      let id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
+      lidarr = await getAlbum(id!);
+      status = lidarr === null ? 404 : 200;
+    }
+  }
+
+  data.headers.delete("content-encoding");
+  console.log(status, method, url);
+  res.statusCode = status;
+  res.headers = data.headers;
+  return { newres: res, data: lidarr };
+  // return new Response(JSON.stringify(lidarr), {
+  //   status: status,
+  //   headers: data.headers,
+  // });
+}
+
+fastify.get("*", async (req, res) => {
+  let headers = req.headers;
+  const host = headers["x-proxy-host"];
+  if (host === "ws.audioscrobbler.com") {
+    const { newres, data } = await doScrobbler(req, res);
+    res = newres;
+    return data;
+  }
+  const { newres, data } = await doApi(req, res);
+  res = newres;
+  return data;
 });
 
-app.listen({ port: 8080 }, (err, address) => {
-  if (err) throw err;
-  console.log(`Proxy läuft auf ${address}`);
+fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
+  console.log("Lidarr++Deemix running at " + address);
+  if (process.env.OVERRIDE_MB === "true") {
+    console.log("Overriding MusicBrainz API with Deemix API");
+  }
 });

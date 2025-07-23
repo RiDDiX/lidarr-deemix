@@ -1,22 +1,28 @@
-import fetch from 'node-fetch';
+import { normalize } from "./helpers.js";
 
-const BASE = process.env.LIDARR_API_BASE || 'https://api.lidarr.audio/api/v0.4';
+const lidarrApiUrl = "https://api.lidarr.audio";
 
-export interface Artist { name: string; [key: string]: any }
+export async function getLidarArtist(name: string) {
+  const res = await fetch(
+    `${lidarrApiUrl}/api/v0.4/search?type=all&query=${name}`
+  );
+  const json = (await res.json()) as [];
+  const a = json.find(
+    (a) =>
+      a["album"] === null &&
+      typeof a["artist"] !== "undefined" &&
+      normalize(a["artist"]["artistname"]) === normalize(name)
+  );
+  if (typeof a !== "undefined") {
+    return a["artist"];
+  }
+  return null;
+}
 
-export async function searchMusicbrainz(
-  query: string,
-  offset?: number,
-  limit?: number
-): Promise<Artist[]> {
-  const url = new URL(`${BASE}/search`);
-  url.searchParams.set('type', 'artist');
-  url.searchParams.set('query', query);
-  if (offset != null) url.searchParams.set('offset', offset.toString());
-  if (limit  != null) url.searchParams.set('limit',  limit.toString());
-
-  const res = await fetch(url.toString(), { timeout: 5000 });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.artists || [];
+export async function getAllLidarrArtists() {
+  const res = await fetch(`${process.env.LIDARR_URL}/api/v1/artist`, {
+    headers: { "X-Api-Key": process.env.LIDARR_API_KEY as string },
+  });
+  const json = (await res.json()) as [];
+  return json;
 }

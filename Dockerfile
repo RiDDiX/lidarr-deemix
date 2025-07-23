@@ -1,23 +1,12 @@
-FROM python:3.12-alpine
+FROM python:alpine
 
 WORKDIR /app
-
-RUN apk add --no-cache \
-    nodejs npm bash curl build-base openssl-dev libffi-dev
-
-COPY python/requirements.txt python/requirements.txt
-RUN python -m pip install --upgrade pip \
- && python -m pip install --no-cache-dir -r python/requirements.txt
-
-RUN npm install -g pnpm
+RUN apk add --no-cache nodejs npm curl rust cargo build-base openssl-dev bsd-compat-headers bash
+COPY python/requirements.txt ./python/requirements.txt
+RUN python -m pip install -r python/requirements.txt
+RUN npm i -g pnpm
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install
-
+RUN pnpm i
 COPY . .
-
-RUN pnpm run build
-RUN chmod +x ./run.sh
-
-EXPOSE 7272 8080
-
-CMD ["./run.sh"]
+EXPOSE 8080
+CMD ["/app/run.sh"]

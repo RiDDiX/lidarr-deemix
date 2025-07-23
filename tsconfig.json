@@ -1,13 +1,13 @@
 {
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": [
+    "@tsconfig/node20/tsconfig.json"
+    // "@tsconfig/strictest/tsconfig.json"
+  ],
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "commonjs",
-    "moduleResolution": "node",
     "outDir": "./dist",
-    "rootDir": "./src",
-    "strict": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true
+    "rootDir": "./src"
   },
-  "include": ["src/**/*.ts"]
+
+  "include": ["./*.ts", "src/index.ts", "src/deemix.ts", "src/lidarr.ts"]
 }
