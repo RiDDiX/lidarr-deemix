@@ -1,4 +1,4 @@
-import { fetchWithTimeout, buildQuery } from './helpers'
+import { fetchWithTimeout, buildQuery } from './helpers.js'
 
 const BASE = process.env.DEEMIX_URL || 'http://127.0.0.1:7171'
 
@@ -7,7 +7,6 @@ export async function searchDeemix(
   limit = '100',
   offset = '0'
 ): Promise<any> {
-  // hier liefern wir nur Artists als Beispiel
   const qs = buildQuery({ q: query, limit, offset })
   const res = await fetchWithTimeout(`${BASE}/search/artists?${qs}`, {
     method: 'GET'

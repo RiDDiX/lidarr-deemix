@@ -1,8 +1,8 @@
-import fetch, { RequestInit } from 'node-fetch'
+import fetch, { RequestInit, Response } from 'node-fetch'
 import { URLSearchParams } from 'url'
 
 /**
- * Wrapper um fetch mit AbortController.
+ * fetch mit Timeout über AbortController
  */
 export async function fetchWithTimeout(
   url: string,
@@ -19,7 +19,7 @@ export async function fetchWithTimeout(
 }
 
 /**
- * Baut eine query-string aus einem Objekt.
+ * Baut query-string aus Objekt
  */
 export function buildQuery(params: Record<string, string | undefined>): string {
   const qs = new URLSearchParams()

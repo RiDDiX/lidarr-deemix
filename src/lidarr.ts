@@ -1,4 +1,4 @@
-import { fetchWithTimeout, buildQuery } from './helpers'
+import { fetchWithTimeout, buildQuery } from './helpers.js'
 
 const BASE = 'https://api.lidarr.audio/api/v0.4'
 

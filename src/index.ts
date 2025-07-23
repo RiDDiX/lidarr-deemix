@@ -1,25 +1,25 @@
 import Fastify from 'fastify'
 import dotenv from 'dotenv'
-import * as lidarr from './lidarr'
-import * as deemix from './deemix'
+import * as lidarr from './lidarr.js'
+import * as deemix from './deemix.js'
 
 dotenv.config()
 const server = Fastify({ logger: true })
 
-// Gemeinsamer Search-Endpunkt
+// Gemeinsame Suche
 server.get('/api/v0.4/search', async (req, reply) => {
   const { query = '', limit = '100', offset = '0' } = (req.query as any)
 
-  // 1) Offizielle Lidarr-Suche
-  let lidarrRes: any = null
+  // 1) Offizielle Lidarr‑API
+  let lidarrRes = null
   try {
     lidarrRes = await lidarr.searchLidarr(query, limit, offset)
   } catch (err) {
     server.log.warn(`Lidarr failed: ${(err as Error).message}`)
   }
 
-  // 2) Immer Deezer/Deemix dazu (Fallback oder Ergänzung)
-  let deemixRes: any = null
+  // 2) Deezer/Deemix immer zusätzlich
+  let deemixRes = null
   try {
     deemixRes = await deemix.searchDeemix(query, limit, offset)
   } catch (err) {
@@ -29,18 +29,16 @@ server.get('/api/v0.4/search', async (req, reply) => {
   return { lidarr: lidarrRes, deemix: deemixRes }
 })
 
-// Beispiel: Einzel‑Artist holen
+// Einzel‑Artist: Lidarr, sonst Deemix
 server.get('/api/v0.4/artist/:id', async (req, reply) => {
   const id = (req.params as any).id
-  // Versuch Lidarr
   try {
     return await lidarr.getArtistLidarr(id)
   } catch {
-    // dann Deezer
     return await deemix.getArtistDeemix(id)
   }
 })
 
 const port = Number(process.env.PORT || 3000)
 server.listen({ port, host: '0.0.0.0' })
-  .then(() => server.log.info(`listening on ${port}`))
+  .then(() => server.log.info(`Listening on ${port}`))
