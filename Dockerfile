@@ -3,13 +3,7 @@ FROM python:3.12-alpine
 WORKDIR /app
 
 RUN apk add --no-cache \
-    nodejs \
-    npm \
-    bash \
-    curl \
-    build-base \
-    openssl-dev \
-    libffi-dev
+    nodejs npm bash curl build-base openssl-dev libffi-dev
 
 COPY python/requirements.txt python/requirements.txt
 RUN python -m pip install --upgrade pip \
@@ -22,9 +16,8 @@ RUN pnpm install
 COPY . .
 
 RUN pnpm run build
-
 RUN chmod +x ./run.sh
 
-EXPOSE 8080
+EXPOSE 7272 8080
 
 CMD ["./run.sh"]

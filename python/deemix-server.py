@@ -57,10 +57,10 @@ def album(album_id):
 def download(type, object_id, bitrate):
     br    = getBitrateNumberFromText(bitrate)
     track = generateDownloadObject(dz, f"https://www.deezer.com/us/{type}/{object_id}", br)
-    album = track.album.get('title') if getattr(track, 'album', None) else track.toDict().get('trackname','')
-    norm  = normalize_title(album)
+    title = track.album.get('title') if getattr(track, 'album', None) else track.toDict().get('trackname','')
+    norm  = normalize_title(title)
     if norm in imported_albums:
-        return jsonify({"status":"skipped","message":f"Album '{album}' bereits importiert"})
+        return jsonify({"status":"skipped","message":f"Album '{title}' bereits importiert"})
     imported_albums.add(norm)
     Downloader(dz, track, settings, listener).start()
     return jsonify(track.toDict())

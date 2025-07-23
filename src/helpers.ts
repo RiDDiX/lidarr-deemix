@@ -10,9 +10,9 @@ export function normalizeTitle(title: string): string {
 
 export function mergeArtists<T extends { name: string }>(a: T[], b: T[]): T[] {
   const map = new Map<string, T>();
-  for (const item of [...a, ...b]) {
-    const key = normalizeTitle(item.name);
-    if (!map.has(key)) map.set(key, item);
+  for (const artist of [...a, ...b]) {
+    const key = normalizeTitle(artist.name);
+    if (!map.has(key)) map.set(key, artist);
   }
   return Array.from(map.values());
 }

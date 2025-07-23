@@ -1,11 +1,15 @@
 import fetch from 'node-fetch';
 
+const BASE = process.env.LIDARR_API_BASE || 'https://api.lidarr.audio/api/v0.4';
+
+export interface Artist { name: string; [key: string]: any }
+
 export async function searchMusicbrainz(
   query: string,
   offset?: number,
   limit?: number
-): Promise<{ name: string }[]> {
-  const url = new URL('https://api.lidarr.audio/api/v0.4/search');
+): Promise<Artist[]> {
+  const url = new URL(`${BASE}/search`);
   url.searchParams.set('type', 'artist');
   url.searchParams.set('query', query);
   if (offset != null) url.searchParams.set('offset', offset.toString());

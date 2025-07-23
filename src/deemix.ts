@@ -1,11 +1,15 @@
 import fetch from 'node-fetch';
 
+const BASE = process.env.DEEMIX_API_BASE || 'http://127.0.0.1:7272';
+
+export interface Artist { name: string; [key: string]: any }
+
 export async function searchDeemix(
   query: string,
   offset?: number,
   limit?: number
-): Promise<{ name: string }[]> {
-  const url = new URL('http://127.0.0.1:7272/search/artists');
+): Promise<Artist[]> {
+  const url = new URL(`${BASE}/search/artists`);
   url.searchParams.set('q', query);
   if (offset != null) url.searchParams.set('offset', offset.toString());
   if (limit  != null) url.searchParams.set('limit',  limit.toString());
