@@ -1,60 +1,50 @@
-# syntax=docker/dockerfile:1
-
-#######################################
-# 1) Frontend bauen
-#######################################
+# ───────────── Frontend Stage ─────────────
 FROM node:18-alpine AS frontend
+
 WORKDIR /app
-
-# pnpm exakt auf deine Lockfile‑Version pinnen
-ARG PNPM_VERSION=6.32.10
-RUN npm install -g pnpm@$PNPM_VERSION
-
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
 
-# Quell‑Files kopieren und build ausführen
+# pnpm installieren und Abhängigkeiten einspielen
+RUN npm install -g pnpm \
+ && pnpm install --frozen-lockfile
+
 COPY . .
-RUN pnpm run build
+RUN pnpm build
 
-#######################################
-# 2) Python‑Dependencies bauen
-#######################################
+# ─────────── Python Builder Stage ───────────
 FROM python:3.12-slim AS builder
+
 WORKDIR /app
 
+# System‑Deps für build
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       gcc libffi-dev pkg-config libssl-dev \
  && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-#######################################
-# 3) Fertiges Runtime‑Image
-#######################################
-FROM python:3.12-slim AS runtime
+COPY deemix-server.py http-redirect-request.py ./
+
+# ───────────── Runtime Stage ─────────────
+FROM python:3.12-slim
+
 WORKDIR /app
 
-# Nur ca‑certificates für TLS
+# Nur ca‑certificates, keine Build‑Tools
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-# Python‑Pakete kopieren
+# Packages und App kopieren
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /app/deemix-server.py .
+COPY --from=builder /app/http-redirect-request.py .
+COPY --from=frontend /app/dist ./frontend
 
-# Deine Flask‑App kopieren
-COPY deemix-server.py ./
-
-# Statische Frontend‑Assets
-COPY --from=frontend /app/build ./static
-
-# Auf Port 8080 laufen lassen
+# Port 8080 benutzen
 EXPOSE 8080
-ENV DEEMIX_ARL=${DEEMIX_ARL}
 
-# waitress auf Port 8080
-CMD ["waitress-serve", "--listen=0.0.0.0:8080", "deemix-server:app"]
+# Server starten
+ENTRYPOINT ["waitress-serve", "--port=8080", "deemix-server:app"]
