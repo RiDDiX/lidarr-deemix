@@ -12,25 +12,27 @@ RUN apk add --no-cache \
     openssl-dev \
     libffi-dev
 
-# Python‑Dependencies
+# Python dependencies
 COPY python/requirements.txt python/requirements.txt
 RUN python -m pip install --upgrade pip \
  && python -m pip install --no-cache-dir -r python/requirements.txt
 
-# Node‑Dependencies
+# pnpm and Node.js dependencies
 RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install
 
-# Quellcode
+# Copy application code
 COPY . .
 
-# build TypeScript
+# Build TypeScript
 RUN pnpm run build
 
-# make run.sh executable
+# Make run.sh executable
 RUN chmod +x ./run.sh
 
+# Expose ports
 EXPOSE 7272 8080
 
+# Start all services
 CMD ["./run.sh"]

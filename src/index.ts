@@ -1,3 +1,4 @@
+// src/index.ts
 import Fastify, { FastifyRequest, FastifyReply } from 'fastify';
 import fetch from 'node-fetch';
 import { searchMusicbrainz } from './lidarr';

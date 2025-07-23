@@ -1,3 +1,4 @@
+# python/requirements.txt
 deemix==3.6.6
 deezer_py==1.3.7
 Flask==2.2.5

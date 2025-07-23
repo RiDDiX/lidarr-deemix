@@ -1,12 +1,15 @@
+# run.sh
 #!/usr/bin/env bash
 set -e
 
-# start Python Deemix‑Server
+# Start Python Deemix server
 python python/deemix-server.py &
-# build & start Node‑Proxy
+
+# Start Node proxy (built JS)
 pnpm run start &
-# start mitmproxy
+
+# Start mitmproxy
 mitmdump -s python/http-redirect-request.py &
 
-# wait on all
+# Wait on all
 wait
