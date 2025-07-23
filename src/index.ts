@@ -14,7 +14,9 @@ app.get('/api/v0.4/search', async (req: FastifyRequest, reply: FastifyReply) => 
   const lim  = parseInt((req.query as any).limit)  || undefined;
   if (!q) return reply.status(400).send({ error: 'query ist erforderlich' });
 
-  let mb = [], dz = [];
+  let mb: { name: string }[] = [];
+  let dz: { name: string }[] = [];
+
   try { mb = await searchMusicbrainz(q, offs, lim) } catch { console.warn('MB offline') }
   try { dz = await searchDeemix(q, offs, lim)       } catch { console.warn('Deemix offline') }
 
