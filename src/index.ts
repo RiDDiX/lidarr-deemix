@@ -39,6 +39,6 @@ server.get('/api/v0.4/artist/:id', async (req, reply) => {
   }
 })
 
-const port = Number(process.env.PORT || 3000)
-server.listen({ port, host: '0.0.0.0' })
-  .then(() => server.log.info(`Listening on ${port}`))
+const PORT = parseInt(process.env.PORT as string, 10) || 7171
+await server.listen({ port: PORT, host: '0.0.0.0' })
+server.log.info(`Listening on ${PORT}`)
