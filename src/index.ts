@@ -1,78 +1,57 @@
-import express from 'express';
-import axios from 'axios';
+import Fastify, { FastifyRequest, FastifyReply } from 'fastify';
+import fetch from 'node-fetch';
 import { searchMusicbrainz } from './lidarr';
 import { searchDeemix }       from './deemix';
 import { mergeArtists }       from './helpers';
 
-const app = express();
+const app = Fastify();
+const LIDARR_BASE = 'https://api.lidarr.audio/api/v0.4';
+const DEEMIX_BASE = 'http://127.0.0.1:7272';
 
-const LIDARR_BASE = process.env.LIDARR_API_BASE  || 'https://api.lidarr.audio/api/v0.4';
-const DEEMIX_BASE = process.env.DEEMIX_API_BASE  || 'http://127.0.0.1:7272';
+app.get('/api/v0.4/search', async (req: FastifyRequest, reply: FastifyReply) => {
+  const q    = (req.query as any).query as string;
+  const offs = parseInt((req.query as any).offset) || undefined;
+  const lim  = parseInt((req.query as any).limit)  || undefined;
+  if (!q) return reply.status(400).send({ error: 'query ist erforderlich' });
 
-app.get('/api/v0.4/search', async (req, res) => {
-  const q      = (req.query.query as string) || '';
-  const offs   = parseInt(req.query.offset as string) || undefined;
-  const lim    = parseInt(req.query.limit  as string) || undefined;
+  let mb = [], dz = [];
+  try { mb = await searchMusicbrainz(q, offs, lim) } catch { console.warn('MB offline') }
+  try { dz = await searchDeemix(q, offs, lim)       } catch { console.warn('Deemix offline') }
 
-  if (!q) return res.status(400).json({ error: 'query ist erforderlich' });
-
-  let mb: { name: string }[] = [];
-  try {
-    mb = await searchMusicbrainz(q, offs, lim);
-  } catch {
-    console.warn('MusicBrainz offline → nur Deezer');
-  }
-
-  let dz: { name: string }[] = [];
-  try {
-    dz = await searchDeemix(q, offs, lim);
-  } catch {
-    console.warn('Deezer/Deemix offline oder Fehler');
-  }
-
-  const merged = mergeArtists(mb, dz);
-  res.json(merged);
+  reply.send(mergeArtists(mb, dz));
 });
 
-app.get('/api/v0.4/artist/:id', async (req, res) => {
-  const { id } = req.params;
-  // 1) Offiziell
+app.get('/api/v0.4/artist/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+  const id = (req.params as any).id as string;
   try {
-    const off = await axios.get(`${LIDARR_BASE}/artist/${id}`, { timeout: 5000 });
-    if (off.status === 200 && off.data && typeof off.data === 'object') {
-      return res.json(off.data);
-    }
-  } catch {
-    console.warn(`Lidarr Artist/${id} failed, fallback → Deezer`);
-  }
-  // 2) Deezer
+    const res = await fetch(`${LIDARR_BASE}/artist/${id}`, { timeout: 5000 });
+    if (res.ok) return reply.send(await res.json());
+  } catch { console.warn(`Lidarr artist/${id} failed`) }
+
   try {
-    const dz = await axios.get(`${DEEMIX_BASE}/artists/${id}`, { timeout: 5000 });
-    return res.json(dz.data);
+    const res = await fetch(`${DEEMIX_BASE}/artists/${id}`, { timeout: 5000 });
+    return reply.send(await res.json());
   } catch {
-    return res.status(502).json({ error: 'Artist nicht verfügbar' });
+    return reply.status(502).send({ error: 'Artist nicht verfügbar' });
   }
 });
 
-app.get('/api/v0.4/album/:id', async (req, res) => {
-  const { id } = req.params;
+app.get('/api/v0.4/album/:id', async (req: FastifyRequest, reply: FastifyReply) => {
+  const id = (req.params as any).id as string;
   try {
-    const off = await axios.get(`${LIDARR_BASE}/album/${id}`, { timeout: 5000 });
-    if (off.status === 200 && off.data && typeof off.data === 'object') {
-      return res.json(off.data);
-    }
-  } catch {
-    console.warn(`Lidarr Album/${id} failed, fallback → Deezer`);
-  }
+    const res = await fetch(`${LIDARR_BASE}/album/${id}`, { timeout: 5000 });
+    if (res.ok) return reply.send(await res.json());
+  } catch { console.warn(`Lidarr album/${id} failed`) }
+
   try {
-    const dz = await axios.get(`${DEEMIX_BASE}/albums/${id}`, { timeout: 5000 });
-    return res.json(dz.data);
+    const res = await fetch(`${DEEMIX_BASE}/albums/${id}`, { timeout: 5000 });
+    return reply.send(await res.json());
   } catch {
-    return res.status(502).json({ error: 'Album nicht verfügbar' });
+    return reply.status(502).send({ error: 'Album nicht verfügbar' });
   }
 });
 
-const port = parseInt(process.env.PORT as string) || 8080;
-app.listen(port, () => {
-  console.log(`Lidarr++Deemix Proxy auf Port ${port}`);
+app.listen({ port: 8080 }, (err, address) => {
+  if (err) throw err;
+  console.log(`Proxy läuft auf ${address}`);
 });
