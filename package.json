@@ -2,6 +2,7 @@
   "name": "lidarr-deemix",
   "type": "module",
   "scripts": {
+    "build": "tsc",
     "start": "ts-node --project tsconfig.tsnode.json src/index.ts",
     "dev":   "tsc-watch --onSuccess \"node ./dist/index.js\""
   },
