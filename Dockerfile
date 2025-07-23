@@ -1,63 +1,74 @@
-# ┌───────────────────────────────────────
-# │ Stage 1: Build the Node/TS app
-# └───────────────────────────────────────
-FROM node:18-alpine AS node_builder
+# syntax=docker/dockerfile:1.4
 
-WORKDIR /app
-
-# install the pnpm version matching your lockfile
-COPY package.json pnpm-lock.yaml ./
-RUN npm install -g pnpm@8 \
- && pnpm install --frozen-lockfile
-
-# compile TypeScript into /app/dist
-COPY tsconfig.json tsconfig.tsnode.json src/ ./src/
-RUN pnpm build
-
-
-# ┌───────────────────────────────────────
-# │ Stage 2: Install Python deps
-# └───────────────────────────────────────
-FROM python:3.12-slim AS python_builder
+########################################
+# 1) Python‑Builder: Deemix‑Server
+########################################
+FROM python:3.12-slim AS python-builder
 
 WORKDIR /opt/deemix-python
 
-COPY python/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-
-# copy your server scripts
-COPY python/ .
-
-
-# ┌───────────────────────────────────────
-# │ Stage 3: Final runtime image
-# └───────────────────────────────────────
-FROM debian:bookworm-slim
-
-# get a minimal Node.js + Python3 runtime
+# System‑Deps für Deemix
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      nodejs npm \
-      python3 python3-pip \
+      gcc \
+      libffi-dev \
+      pkg-config \
+      libssl-dev \
  && rm -rf /var/lib/apt/lists/*
+
+# Python‑Requirements installieren
+COPY python/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+########################################
+# 2) Node‑Builder: TypeScript/Node‑App
+########################################
+FROM node:18-alpine AS node-builder
 
 WORKDIR /app
 
-# bring in built Node app
-COPY --from=node_builder /app/dist ./dist
-COPY --from=node_builder /app/node_modules ./node_modules
+# Lockfile‑Mismatch umgehen
+COPY package.json pnpm-lock.yaml ./
+RUN npm install -g pnpm@8 \
+ && pnpm install --no-frozen-lockfile
 
-# bring in your Python helper
-COPY --from=python_builder /opt/deemix-python ./deemix-python
+# Quellcode kopieren und builden
+COPY . .
+RUN pnpm run build
 
-# your launcher script
-COPY run.sh ./
+########################################
+# 3) Runtime‑Image
+########################################
+FROM debian:bookworm-slim AS runtime
+
+# Arbeitsverzeichnis
+WORKDIR /app
+
+# Runtime‑Deps installieren: Node + Python
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      nodejs \
+      python3 \
+      python3-pip \
+ && rm -rf /var/lib/apt/lists/*
+
+# 3.1) Kopiere und installiere Node‑App
+COPY --from=node-builder /app/dist ./dist
+COPY package.json pnpm-lock.yaml ./
+RUN npm install -g pnpm@8 \
+ && pnpm install --no-frozen-lockfile --prod
+
+# 3.2) Kopiere Python‑Server
+COPY --from=python-builder /opt/deemix-python /opt/deemix-python
+COPY python/deemix-server.py python/http-redirect-request.py ./
+
+# 3.3) Dein Start‑Script
+COPY run.sh .
 RUN chmod +x run.sh
 
-# only these two ports are exposed—
-# 8080 for your TS/Node API
+# Ports exposen – getrennt, ohne Kommentar inline!
 EXPOSE 8080
+EXPOSE 7272
 
-
-# spin up both services
+# Standard‑Kommando: run.sh startet beide Services
 CMD ["./run.sh"]
