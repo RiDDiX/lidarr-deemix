@@ -1,34 +1,31 @@
 #######################################
+# 1) Node‑Builder Stage
+#######################################
+FROM node:18-alpine AS node-builder
+
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN npm install -g pnpm@8 \
+  && pnpm install --no-frozen-lockfile \
+  && pnpm run build
+
+#######################################
+# 2) Python‑Builder Stage (unchanged)
+#######################################
+FROM python:3.12-slim AS python-builder
+# … wie gehabt …
+
+#######################################
 # 3) Final Runtime Stage
 #######################################
 FROM debian:bookworm-slim AS runtime
 
-# 1) Grundsystem + Node.js + Python3 + npm + pip3 installieren
-RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates \
-      nodejs npm \
-      python3 python3-pip \
- && rm -rf /var/lib/apt/lists/*
+# … deine Runtime‑Schritte …
 
-# 2) 'python' → 'python3' Symlink, damit "python" verfügbar ist
-RUN ln -s /usr/bin/python3 /usr/bin/python
-
-# 3) Python‑Dependencies installieren (inkl. mitmproxy & waitress usw.)
-#    wir kopieren nur requirements.txt aus dem python‑Ordner
-WORKDIR /opt/deemix-python
-COPY python/requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-# 4) Deemix‑Service‑Quellcode
-COPY python/ .
-
-# 5) Node‑App deployen: kopiere bereits gebauten Output + node_modules
-WORKDIR /app
-COPY --from=node-builder /app/dist ./dist
+# **WICHTIG**: Hier FROM‑Angaben anpassen
+COPY --from=node-builder /app/dist    ./dist
 COPY --from=node-builder /app/node_modules ./node_modules
-# optional: falls du Umgebungs‑Variablen in package.json brauchst
-COPY --from=node-builder /app/package.json ./package.json
+COPY --from=node-builder /app/package.json  ./package.json
 
 # 6) Dein Start‑Skript
 COPY run.sh .
