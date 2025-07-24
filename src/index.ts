@@ -67,14 +67,13 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
   } catch (e) {
     console.error(e);
   }
-// FIXED TEIL IN doApi()
-  let lidarr: any;
+let lidarr: any;
   try {
-    if (data?.headers.get("content-type")?.includes("application/json")) {
+    if (data && data.headers.get("content-type")?.includes("application/json")) {
       lidarr = await data.json();
     } else {
-      const txt = await data.text();
-      console.warn("Unerwarteter Inhalt (kein JSON):", txt.slice(0, 200));
+      const txt = await data?.text?.();
+      console.warn("Unerwarteter Inhalt (kein JSON):", txt?.slice(0, 200));
       lidarr = null;
     }
   } catch (e) {
