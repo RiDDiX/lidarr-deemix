@@ -1,8 +1,10 @@
-import Fastify, { FastifyRequest, FastifyReply } from "fastify";
+// index.ts
 import fetch from "node-fetch";
+import Fastify, { FastifyRequest, FastifyReply } from "fastify";
+import _ from "lodash";
 import dotenv from "dotenv";
-import { deemixSearch, deemixArtist, getAlbum } from "./deemix.js";
-import { removeKeys, normalize } from "./helpers.js";
+import { search, getArtist, getAlbum, deemixArtist } from "./deemix.js";
+import { removeKeys } from "./helpers.js";
 import { getArtistData } from "./artistData.js";
 
 dotenv.config();
@@ -10,75 +12,115 @@ dotenv.config();
 const lidarrApiUrl = "https://api.lidarr.audio";
 const scrobblerApiUrl = "https://ws.audioscrobbler.com";
 
-const fastify = Fastify({ logger: false });
-
-fastify.setErrorHandler((error, req, res) => {
-  console.error("Error:", error);
-  res.status(500).send({ error: "Internal Server Error", message: error.message });
+const fastify = Fastify({
+  logger: { level: "error" },
 });
 
-fastify.all("*", async (req: FastifyRequest, res: FastifyReply) => {
-  const targetHost = req.headers["x-proxy-host"];
+// Zentraler Fehler-Handler
+fastify.setErrorHandler((error, request, reply) => {
+  console.error("Error:", error);
+  reply.status(500).send({ error: "Internal Server Error", message: error.message });
+});
 
-  const proxyUrl = new URL(`http://localhost${req.url}`);
+async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
+  const headers = req.headers;
+  const u = new URL(`http://localhost${req.url}`);
   const method = req.method;
-  const headers = { ...req.headers } as Record<string, string>;
-  delete headers.host;
-  delete headers.connection;
-
-  const fetchOptions: any = {
-    method,
-    headers,
-  };
-
-  if (method !== "GET" && method !== "HEAD" && req.body) {
-    fetchOptions.body = typeof req.body === "object" ? JSON.stringify(req.body) : req.body.toString();
-    if (!headers["content-type"]) fetchOptions.headers["content-type"] = "application/json";
-  }
-
+  const body = req.body ? req.body.toString() : "";
+  let status = 200;
+  const nh: { [key: string]: any } = {};
+  Object.entries(headers).forEach(([key, value]) => {
+    if (key !== "host" && key !== "connection") nh[key] = value;
+  });
+  const url = `${u.pathname}${u.search}`;
+  let data;
   try {
-    let url = `${proxyUrl.pathname}${proxyUrl.search}`;
-    let baseUrl = lidarrApiUrl;
-
-    if (targetHost === "ws.audioscrobbler.com") baseUrl = scrobblerApiUrl;
-
-    let response = await fetch(`${baseUrl}${url}`, fetchOptions);
-    let data = await response.json();
-
-    if (targetHost === "ws.audioscrobbler.com" && process.env.OVERRIDE_MB === "true") {
-      data = removeKeys(data, ["mbid"]);
-    }
-
-    // Deezer Fallback
-    if (process.env.FALLBACK_DEEZER === "true") {
-      if (url.includes("/v0.4/search")) {
-        const query = proxyUrl.searchParams.get("query") || "";
-        const fallbackResults = await deemixSearch(query);
-        if (fallbackResults && fallbackResults.length > 0) {
-          return fallbackResults;
-        }
-      }
-
-      if (url.includes("/v0.4/artist/")) {
-        const query = proxyUrl.searchParams.get("query") || "";
-        const artist = await getArtistData(query);
-        if (artist) return artist;
-      }
-
-      if (url.includes("/v0.4/album/") && url.includes("-bbbb-")) {
-        const id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
-        if (id) {
-          const album = await getAlbum(id);
-          if (album) return album;
-        }
-      }
-    }
-
-    return data;
+    data = await fetch(`${scrobblerApiUrl}${url}`, { method, body, headers: nh });
+    status = data.status;
   } catch (e) {
-    console.error("Proxy error:", e);
-    res.status(502).send({ error: "Bad Gateway", message: e.message });
+    console.error(e);
   }
+  res.statusCode = status;
+  res.headers = data?.headers as any;
+  let json = await data?.json();
+  if (process.env.OVERRIDE_MB === "true") {
+    json = removeKeys(json, ["mbid"]);
+  }
+  return { newres: res, data: json };
+}
+
+async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
+  const headers = req.headers;
+  const u = new URL(`http://localhost${req.url}`);
+  const method = req.method;
+  const body = req.body ? req.body.toString() : "";
+  let status = 200;
+  const nh: { [key: string]: any } = {};
+  Object.entries(headers).forEach(([key, value]) => {
+    if (key !== "host" && key !== "connection") nh[key] = value;
+  });
+  const url = `${u.pathname}${u.search}`;
+  let data;
+  try {
+    data = await fetch(`${lidarrApiUrl}${url}`, { method, body, headers: nh });
+    status = data.status;
+  } catch (e) {
+    console.error(e);
+  }
+  let lidarr: any;
+  try {
+    lidarr = await data?.json();
+  } catch (e) {
+    console.error(e);
+  }
+  if (url.includes("/v0.4/search")) {
+    const queryParam = u.searchParams.get("query") || "";
+    lidarr = await search(lidarr, queryParam, url.includes("type=all"));
+  }
+  if (url.includes("/v0.4/artist/")) {
+    // Zuerst MusicBrainz-Daten abrufen
+    const queryParam = u.searchParams.get("query") || "";
+    const mbArtist = await getArtistData(queryParam);
+    if (mbArtist && mbArtist.Albums && mbArtist.Albums.length > 0) {
+      lidarr = mbArtist;
+    } else {
+      // Falls kein MB-Datensatz gefunden wurde, Fallback zu Deemix
+      if (url.includes("-aaaa-")) {
+        let id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
+        if (id) {
+          lidarr = await deemixArtist(id);
+          status = lidarr === null ? 404 : 200;
+        }
+      } else {
+        lidarr = await deemixArtist(queryParam);
+      }
+    }
+  }
+  if (url.includes("/v0.4/album/")) {
+    if (url.includes("-bbbb-")) {
+      let id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
+      if (id) {
+        lidarr = await getAlbum(id);
+        status = lidarr === null ? 404 : 200;
+      }
+    }
+  }
+  data?.headers.delete("content-encoding");
+  console.log(status, method, url);
+  res.statusCode = status;
+  res.headers = data?.headers as any;
+  return { newres: res, data: lidarr };
+}
+
+fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
+  const headers = req.headers;
+  const host = headers["x-proxy-host"];
+  if (host === "ws.audioscrobbler.com") {
+    const { newres, data } = await doScrobbler(req, res);
+    return data;
+  }
+  const { newres, data } = await doApi(req, res);
+  return data;
 });
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
@@ -86,5 +128,8 @@ fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
     console.error(err);
     process.exit(1);
   }
-  console.log(`Lidarr-Deemix Proxy running at ${address}`);
+  console.log("Lidarr++Deemix running at " + address);
+  if (process.env.OVERRIDE_MB === "true") {
+    console.log("Overriding MusicBrainz API with Deemix API");
+  }
 });
