@@ -289,7 +289,7 @@ export async function search(lidarr: any, query: string, isManual: boolean = tru
   let lartist: any;
   let lidx = -1;
   let didx = -1;
-  if (process.env.OVERRIDE_MB !== "true") {
+if (process.env.OVERRIDE_MB !== "true" && Array.isArray(lidarr)) {
     for (const [i, artist] of lidarr.entries()) {
       if (artist["album"] === null) {
         lartist = artist;

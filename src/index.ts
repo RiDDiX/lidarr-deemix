@@ -35,11 +35,7 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
-  const fetchOpts: any = { method, headers: nh };
-  if (!["GET", "HEAD"].includes(method.toUpperCase()) && body) {
-    fetchOpts.body = body;
-  }
-  data = await fetch(`${lidarrApiUrl}${url}`, fetchOpts);
+    data = await fetch(`${scrobblerApiUrl}${url}`, { method, body, headers: nh });
     status = data.status;
   } catch (e) {
     console.error(e);
@@ -66,20 +62,24 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
-  const fetchOpts: any = { method, headers: nh };
-  if (!["GET", "HEAD"].includes(method.toUpperCase()) && body) {
-    fetchOpts.body = body;
-  }
-  data = await fetch(`${lidarrApiUrl}${url}`, fetchOpts);
+    data = await fetch(`${lidarrApiUrl}${url}`, { method, body, headers: nh });
     status = data.status;
   } catch (e) {
     console.error(e);
   }
+// FIXED TEIL IN doApi()
   let lidarr: any;
   try {
-    lidarr = await data?.json();
+    if (data?.headers.get("content-type")?.includes("application/json")) {
+      lidarr = await data.json();
+    } else {
+      const txt = await data.text();
+      console.warn("Unerwarteter Inhalt (kein JSON):", txt.slice(0, 200));
+      lidarr = null;
+    }
   } catch (e) {
-    console.error(e);
+    console.error("Fehler beim Parsen der Antwort:", e);
+    lidarr = null;
   }
   if (url.includes("/v0.4/search")) {
     const queryParam = u.searchParams.get("query") || "";
