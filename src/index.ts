@@ -35,7 +35,11 @@ async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ ne
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
-    data = await fetch(`${scrobblerApiUrl}${url}`, { method, body, headers: nh });
+  const fetchOpts: any = { method, headers: nh };
+  if (!["GET", "HEAD"].includes(method.toUpperCase()) && body) {
+    fetchOpts.body = body;
+  }
+  data = await fetch(`${lidarrApiUrl}${url}`, fetchOpts);
     status = data.status;
   } catch (e) {
     console.error(e);
@@ -62,7 +66,11 @@ async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: 
   const url = `${u.pathname}${u.search}`;
   let data;
   try {
-    data = await fetch(`${lidarrApiUrl}${url}`, { method, body, headers: nh });
+  const fetchOpts: any = { method, headers: nh };
+  if (!["GET", "HEAD"].includes(method.toUpperCase()) && body) {
+    fetchOpts.body = body;
+  }
+  data = await fetch(`${lidarrApiUrl}${url}`, fetchOpts);
     status = data.status;
   } catch (e) {
     console.error(e);
