@@ -15,21 +15,13 @@ const fastify = Fastify({
   logger: false, // Wir verwenden console.log für mehr Kontrolle
 });
 
-// Zentraler Fehler-Handler, der sicherstellt, dass immer ein gültiges JSON gesendet wird.
 fastify.setErrorHandler((error, request, reply) => {
   console.error("Zentraler Fehler-Handler wurde ausgelöst:", error);
   if (!reply.sent) {
-    const statusCode = error.statusCode || 500;
-    reply.status(statusCode).send({
-      error: error.name || "Internal Server Error",
-      message: error.message,
-    });
+    reply.status(500).send({ error: "Internal Server Error", message: error.message });
   }
 });
 
-/**
- * Parst eine Antwort sicher als JSON. Klont die Antwort, um "body used already"-Fehler zu vermeiden.
- */
 async function safeParseJson(response: Response): Promise<any> {
   const clonedResponse = response.clone();
   try {
@@ -45,6 +37,9 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
     const u = new URL(`http://localhost${req.url}`);
     const url = `${u.pathname}${u.search}`;
     const method = req.method;
+    
+    // === DIE ENTSCHEIDENDE ÄNDERUNG ===
+    // Wir tun immer so, als wäre alles gut, und starten mit Status 200 OK.
     let status = 200;
 
     const nh: { [key: string]: any } = {};
@@ -60,77 +55,71 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
             method,
             body: req.body ? req.body as string : undefined,
             headers: nh,
-            timeout: 15000, // 15 Sekunden Timeout, um 524-Fehler zu vermeiden
+            timeout: 10000, // 10 Sekunden Timeout
         });
-        status = upstreamResponse.status;
-        lidarr = await safeParseJson(upstreamResponse);
-
-        if (!upstreamResponse.ok) {
-             console.warn(`Upstream API Fehler für ${url}. Status: ${status}`);
+        
+        if (upstreamResponse.ok) {
+            lidarr = await safeParseJson(upstreamResponse);
+        } else {
+             console.warn(`Upstream API Fehler für ${url}. Status: ${upstreamResponse.status}`);
+             lidarr = null; // Behandle es als Fehler, fahre aber fort.
         }
 
     } catch (e) {
         console.error(`Netzwerkfehler oder Timeout beim Abruf von ${lidarrApiUrl}${url}:`, e);
-        status = 502; // Bad Gateway
-        lidarr = null; // Setze auf null, damit die Anreicherung von Deemix als Fallback starten kann
+        lidarr = null; // Setze auf null, damit die Anreicherung von Deemix als Fallback startet.
     }
 
-    // Dies ist die Kernlogik: Wenn die Lidarr-API fehlschlägt (lidarr ist null)
-    // oder keine Ergebnisse liefert, initialisieren wir für die Suche mit einem leeren Array.
+    // Stelle sicher, dass `lidarr` für Suchen immer ein Array ist.
     if (url.includes("/search") && !Array.isArray(lidarr)) {
         lidarr = [];
     }
 
-    // Die Anreicherungslogik läuft jetzt immer, entweder mit Lidarr-Daten oder mit einer leeren Liste.
+    // Die Anreicherungslogik läuft jetzt immer, entweder mit den Daten von Lidarr oder mit einer leeren Liste.
+    let finalResult = lidarr;
     if (url.includes("/v0.4/search")) {
         const queryParam = u.searchParams.get("query") || "";
-        lidarr = await search(lidarr, queryParam, url.includes("type=all"));
+        finalResult = await search(lidarr, queryParam, url.includes("type=all"));
     } else if (url.includes("/v0.4/artist/")) {
         const queryParam = u.searchParams.get("query") || "";
         const mbArtist = await getArtistData(queryParam);
         if (mbArtist?.Albums?.length > 0) {
-            lidarr = mbArtist;
+            finalResult = mbArtist;
         } else {
             const id = url.includes("-aaaa-") ? url.split("/").pop()?.split("-").pop()?.replaceAll("a", "") : queryParam;
             if (id) {
-                lidarr = await deemixArtist(id);
-                if (!lidarr) status = 404;
+                finalResult = await deemixArtist(id);
             }
         }
     } else if (url.includes("/v0.4/album/")) {
         if (url.includes("-bbbb-")) {
             const id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
             if (id) {
-                lidarr = await getAlbum(id);
-                if (!lidarr) status = 404;
+                finalResult = await getAlbum(id);
             }
         }
     }
-
-    const responseHeaders: Record<string, any> = {};
-    upstreamResponse?.headers.forEach((value, key) => {
-        if (key.toLowerCase() !== 'content-encoding') {
-            responseHeaders[key] = value;
-        }
-    });
     
-    responseHeaders['content-type'] = 'application/json; charset=utf-8';
-    
-    if(status === 200 && (lidarr === null || (Array.isArray(lidarr) && lidarr.length === 0))) {
+    // Wenn am Ende kein Ergebnis gefunden wurde, setzen wir den Status auf 404.
+    // Lidarr kann damit umgehen und zeigt "No results found" an.
+    if (finalResult === null || (Array.isArray(finalResult) && finalResult.length === 0)) {
         status = 404;
     }
 
-    console.log(`Anfrage: [${method}] ${url}, Antwort-Status: ${status}`);
+    const responseHeaders: Record<string, any> = {
+        'content-type': 'application/json; charset=utf-8'
+    };
+    
+    console.log(`Anfrage: [${method}] ${url}, Finale Antwort an Lidarr: Status ${status}`);
 
-    res.status(status).headers(responseHeaders).send(lidarr || {});
+    // Sende die finale Antwort.
+    res.status(status).headers(responseHeaders).send(finalResult || {});
 }
 
-// Finaler, vereinfachter Handler mit robustem Fehler-Catching
 fastify.all('*', async (req: FastifyRequest, res: FastifyReply) => {
     try {
         await doApi(req, res);
     } catch (err) {
-        // Leitet jeden unerwarteten Fehler an den zentralen `setErrorHandler` weiter.
         res.send(err);
     }
 });
