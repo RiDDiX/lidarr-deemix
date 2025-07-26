@@ -1,7 +1,18 @@
 #!/bin/bash
 
-nohup python ./python/deemix-server.py > ~/nohup_deemix.txt 2>&1 &
-nohup pnpm run start > ~/nohup_server.txt 2>&1 &
-nohup mitmdump -s ./python/http-redirect-request.py > ~/nohup_mitmdump.txt 2>&1 &
+# Erstelle Log-Verzeichnis, falls nicht vorhanden
+mkdir -p /app/logs
 
-tail -f ~/nohup_*.txt
+echo "Starte Deemix Server..."
+python ./python/deemix-server.py > /app/logs/deemix.log 2>&1 &
+
+echo "Starte NodeJS Proxy Server..."
+node ./dist/index.js > /app/logs/server.log 2>&1 &
+
+echo "Starte mitmproxy..."
+mitmdump -s ./python/http-redirect-request.py --set stream_large_bodies=1 > /app/logs/mitmdump.log 2>&1 &
+
+echo "Alle Dienste gestartet. Überwache Logs..."
+# Überwacht alle Log-Dateien und hält den Container am Leben
+# Das -f folgt den Dateien, auch wenn sie neu erstellt werden
+tail -F /app/logs/deemix.log /app/logs/server.log /app/logs/mitmdump.log

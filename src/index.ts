@@ -1,9 +1,8 @@
-// index.ts
-import fetch from "node-fetch";
+import fetch, { Response } from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import _ from "lodash";
 import dotenv from "dotenv";
-import { search, getArtist, getAlbum, deemixArtist } from "./deemix.js";
+import { search, getAlbum, deemixArtist } from "./deemix.js";
 import { removeKeys } from "./helpers.js";
 import { getArtistData } from "./artistData.js";
 
@@ -18,125 +17,127 @@ const fastify = Fastify({
 
 // Zentraler Fehler-Handler
 fastify.setErrorHandler((error, request, reply) => {
-  console.error("Error:", error);
+  console.error("Zentraler Fehler-Handler:", error);
   reply.status(500).send({ error: "Internal Server Error", message: error.message });
 });
 
-async function doScrobbler(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
-  const headers = req.headers;
-  const u = new URL(`http://localhost${req.url}`);
-  const method = req.method;
-  const body = req.body ? req.body.toString() : "";
-  let status = 200;
-  const nh: { [key: string]: any } = {};
-  Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") nh[key] = value;
-  });
-  const url = `${u.pathname}${u.search}`;
-  let data;
+/**
+ * Versucht, eine Antwort als JSON zu parsen.
+ * Wenn es fehlschlägt, wird der Text-Body für das Debugging protokolliert
+ * und ein sicherer Standardwert (z.B. null) zurückgegeben.
+ */
+async function safeParseJson(response: Response): Promise<any> {
   try {
-    data = await fetch(`${scrobblerApiUrl}${url}`, { method, body, headers: nh });
-    status = data.status;
+    return await response.json();
   } catch (e) {
-    console.error(e);
+    const textBody = await response.text();
+    console.warn(`Antwort konnte nicht als JSON geparst werden. Status: ${response.status}. Body:`, textBody.slice(0, 500));
+    return null; // Gibt null zurück, damit der Aufrufer damit umgehen kann
   }
-  res.statusCode = status;
-  res.headers = data?.headers as any;
-  let json = await data?.json();
-  if (process.env.OVERRIDE_MB === "true") {
-    json = removeKeys(json, ["mbid"]);
-  }
-  return { newres: res, data: json };
 }
 
-async function doApi(req: FastifyRequest, res: FastifyReply): Promise<{ newres: FastifyReply; data: any }> {
-  const headers = req.headers;
+async function doApi(req: FastifyRequest, res: FastifyReply) {
   const u = new URL(`http://localhost${req.url}`);
-  const method = req.method;
-  const body = req.body ? req.body.toString() : "";
-  let status = 200;
-  const nh: { [key: string]: any } = {};
-  Object.entries(headers).forEach(([key, value]) => {
-    if (key !== "host" && key !== "connection") nh[key] = value;
-  });
   const url = `${u.pathname}${u.search}`;
-  let data;
+  const method = req.method;
+  let status = 200;
+  
+  // Header für den Upstream-Request vorbereiten
+  const nh: { [key: string]: any } = {};
+  Object.entries(req.headers).forEach(([key, value]) => {
+    if (!['host', 'connection'].includes(key.toLowerCase())) nh[key] = value;
+  });
+
+  let upstreamResponse: Response | null = null;
+  let lidarr: any = null;
+
   try {
-    data = await fetch(`${lidarrApiUrl}${url}`, { method, body, headers: nh });
-    status = data.status;
+    upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { 
+      method, 
+      body: req.body as (string | null), 
+      headers: nh 
+    });
+    status = upstreamResponse.status;
+    lidarr = await safeParseJson(upstreamResponse);
   } catch (e) {
-    console.error(e);
+    console.error(`Fehler beim Abruf von ${lidarrApiUrl}${url}:`, e);
+    status = 502; // Bad Gateway
+    lidarr = { error: "Upstream API fetch failed", details: (e as Error).message };
   }
-let lidarr: any;
+  
+  // Wenn Lidarr nichts findet (oder ein Fehler auftrat), mit einem leeren Array für die Suche initialisieren
+  if (lidarr === null && url.includes("/search")) {
+    lidarr = [];
+  }
+  
   try {
-    if (data && data.headers.get("content-type")?.includes("application/json")) {
-      lidarr = await data.json();
-    } else {
-      const txt = await data?.text?.();
-      console.warn("Unerwarteter Inhalt (kein JSON):", txt?.slice(0, 200));
-      lidarr = null;
-    }
-  } catch (e) {
-    console.error("Fehler beim Parsen der Antwort:", e);
-    lidarr = null;
-  }
-  if (url.includes("/v0.4/search")) {
-    const queryParam = u.searchParams.get("query") || "";
-    lidarr = await search(lidarr, queryParam, url.includes("type=all"));
-  }
-  if (url.includes("/v0.4/artist/")) {
-    // Zuerst MusicBrainz-Daten abrufen
-    const queryParam = u.searchParams.get("query") || "";
-    const mbArtist = await getArtistData(queryParam);
-    if (mbArtist && mbArtist.Albums && mbArtist.Albums.length > 0) {
-      lidarr = mbArtist;
-    } else {
-      // Falls kein MB-Datensatz gefunden wurde, Fallback zu Deemix
-      if (url.includes("-aaaa-")) {
-        let id = url.split("/").pop()?.split("-").pop()?.replaceAll("a", "");
+    // Anreicherungslogik
+    if (url.includes("/v0.4/search")) {
+      const queryParam = u.searchParams.get("query") || "";
+      lidarr = await search(lidarr || [], queryParam, url.includes("type=all"));
+    } else if (url.includes("/v0.4/artist/")) {
+      const queryParam = u.searchParams.get("query") || "";
+      const mbArtist = await getArtistData(queryParam);
+      if (mbArtist?.Albums?.length > 0) {
+        lidarr = mbArtist;
+      } else {
+        const id = url.includes("-aaaa-") ? url.split("/").pop()?.split("-").pop()?.replaceAll("a", "") : queryParam;
         if (id) {
           lidarr = await deemixArtist(id);
-          status = lidarr === null ? 404 : 200;
+          if (!lidarr) status = 404;
         }
-      } else {
-        lidarr = await deemixArtist(queryParam);
+      }
+    } else if (url.includes("/v0.4/album/")) {
+      if (url.includes("-bbbb-")) {
+        const id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
+        if (id) {
+          lidarr = await getAlbum(id);
+          if (!lidarr) status = 404;
+        }
       }
     }
+  } catch(e) {
+      console.error("Fehler bei der Datenanreicherung:", e);
+      // Den ursprünglichen `lidarr`-Inhalt beibehalten, aber Fehler loggen
   }
-  if (url.includes("/v0.4/album/")) {
-    if (url.includes("-bbbb-")) {
-      let id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
-      if (id) {
-        lidarr = await getAlbum(id);
-        status = lidarr === null ? 404 : 200;
-      }
+
+  // Header für die Antwort an Lidarr vorbereiten
+  const responseHeaders: Record<string, any> = {};
+  upstreamResponse?.headers.forEach((value, key) => {
+    if (key.toLowerCase() !== 'content-encoding') { // Verhindert Kompressionsprobleme
+      responseHeaders[key] = value;
     }
-  }
-  data?.headers.delete("content-encoding");
-  console.log(status, method, url);
-  res.statusCode = status;
-  res.headers = data?.headers as any;
-  return { newres: res, data: lidarr };
+  });
+
+  console.log(`[${method}] ${status} ${url}`);
+  
+  // Stelle sicher, dass niemals null oder undefined als Body gesendet wird.
+  // Lidarr erwartet immer ein JSON-Objekt.
+  res.status(status).headers(responseHeaders).send(lidarr || {});
 }
 
-fastify.get("*", async (req: FastifyRequest, res: FastifyReply) => {
-  const headers = req.headers;
-  const host = headers["x-proxy-host"];
+async function doScrobbler(req: FastifyRequest, res: FastifyReply) {
+    // Implementierung für Scrobbler... (kann ähnlich wie doApi aufgebaut werden)
+    res.status(501).send({error: "Not implemented"});
+}
+
+// Handler für alle Methoden, um GET, POST, etc. abzufangen
+fastify.all('*', async (req: FastifyRequest, res: FastifyReply) => {
+  const host = req.headers["x-proxy-host"];
   if (host === "ws.audioscrobbler.com") {
-    const { newres, data } = await doScrobbler(req, res);
-    return data;
+    return doScrobbler(req, res);
   }
-  const { newres, data } = await doApi(req, res);
-  return data;
+  return doApi(req, res);
 });
+
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
   if (err) {
     console.error(err);
     process.exit(1);
   }
-  console.log("Lidarr++Deemix running at " + address);
+  console.log("Lidarr++Deemix Proxy running at " + address);
   if (process.env.OVERRIDE_MB === "true") {
-    console.log("Overriding MusicBrainz API with Deemix API");
+    console.log("WARNUNG: MusicBrainz API wird vollständig durch Deemix überschrieben.");
   }
 });
