@@ -17,22 +17,26 @@ const fastify = Fastify({
 
 // Zentraler Fehler-Handler
 fastify.setErrorHandler((error, request, reply) => {
-  console.error("Zentraler Fehler-Handler:", error);
-  reply.status(500).send({ error: "Internal Server Error", message: error.message });
+  console.error("Zentraler Fehler-Handler erfasst:", error);
+  // Sende eine generische JSON-Fehlermeldung
+  if (!reply.sent) {
+    reply.status(500).send({ error: "Internal Server Error", message: error.message });
+  }
 });
 
 /**
- * Versucht, eine Antwort als JSON zu parsen.
- * Wenn es fehlschlägt, wird der Text-Body für das Debugging protokolliert
- * und ein sicherer Standardwert (z.B. null) zurückgegeben.
+ * Parst eine Antwort sicher als JSON. Klont die Antwort, um den "body used already"-Fehler zu vermeiden.
  */
 async function safeParseJson(response: Response): Promise<any> {
+  // Klone die Antwort, da der Body nur einmal gelesen werden kann.
+  const clonedResponse = response.clone();
   try {
     return await response.json();
   } catch (e) {
-    const textBody = await response.text();
+    // Wenn JSON-Parsing fehlschlägt, logge den Text für Debugging-Zwecke vom Klon.
+    const textBody = await clonedResponse.text();
     console.warn(`Antwort konnte nicht als JSON geparst werden. Status: ${response.status}. Body:`, textBody.slice(0, 500));
-    return null; // Gibt null zurück, damit der Aufrufer damit umgehen kann
+    return null; // Gibt null zurück, damit der Aufrufer damit umgehen kann.
   }
 }
 
@@ -42,32 +46,37 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
   const method = req.method;
   let status = 200;
   
-  // Header für den Upstream-Request vorbereiten
   const nh: { [key: string]: any } = {};
   Object.entries(req.headers).forEach(([key, value]) => {
     if (!['host', 'connection'].includes(key.toLowerCase())) nh[key] = value;
   });
 
   let upstreamResponse: Response | null = null;
-  let lidarr: any = null;
+  let lidarr: any = null; // Wichtig: Startet als null
 
   try {
-    upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { 
-      method, 
-      // === KORRIGIERTE ZEILE ===
-      body: req.body ? req.body as string : undefined, 
-      headers: nh 
+    upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, {
+      method,
+      body: req.body ? req.body as string : undefined,
+      headers: nh
     });
     status = upstreamResponse.status;
-    lidarr = await safeParseJson(upstreamResponse);
+    if (upstreamResponse.ok) {
+        lidarr = await safeParseJson(upstreamResponse);
+    } else {
+        console.warn(`Upstream API Fehler für ${url}. Status: ${status}`);
+        // Behandle den Fall, dass Lidarr einen Fehler zurückgibt (z.B. 404), aber trotzdem JSON sendet
+        lidarr = await safeParseJson(upstreamResponse) || null;
+    }
   } catch (e) {
-    console.error(`Fehler beim Abruf von ${lidarrApiUrl}${url}:`, e);
+    console.error(`Netzwerkfehler beim Abruf von ${lidarrApiUrl}${url}:`, e);
     status = 502; // Bad Gateway
-    lidarr = { error: "Upstream API fetch failed", details: (e as Error).message };
+    lidarr = null;
   }
   
-  // Wenn Lidarr nichts findet (oder ein Fehler auftrat), mit einem leeren Array für die Suche initialisieren
-  if (lidarr === null && url.includes("/search")) {
+  // === KORREKTUR für "not iterable" ===
+  // Stelle sicher, dass `lidarr` ein Array ist, bevor es an `search` übergeben wird.
+  if (url.includes("/search") && !Array.isArray(lidarr)) {
     lidarr = [];
   }
   
@@ -75,7 +84,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
     // Anreicherungslogik
     if (url.includes("/v0.4/search")) {
       const queryParam = u.searchParams.get("query") || "";
-      lidarr = await search(lidarr || [], queryParam, url.includes("type=all"));
+      lidarr = await search(lidarr, queryParam, url.includes("type=all"));
     } else if (url.includes("/v0.4/artist/")) {
       const queryParam = u.searchParams.get("query") || "";
       const mbArtist = await getArtistData(queryParam);
@@ -99,38 +108,42 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
     }
   } catch(e) {
       console.error("Fehler bei der Datenanreicherung:", e);
-      // Den ursprünglichen `lidarr`-Inhalt beibehalten, aber Fehler loggen
+      // Im Fehlerfall den Status auf 500 setzen und eine Fehlermeldung zurückgeben
+      status = 500;
+      lidarr = { error: "Fehler bei der Datenanreicherung", details: (e as Error).message };
   }
 
-  // Header für die Antwort an Lidarr vorbereiten
   const responseHeaders: Record<string, any> = {};
   upstreamResponse?.headers.forEach((value, key) => {
-    if (key.toLowerCase() !== 'content-encoding') { // Verhindert Kompressionsprobleme
+    if (key.toLowerCase() !== 'content-encoding') {
       responseHeaders[key] = value;
     }
   });
 
   console.log(`[${method}] ${status} ${url}`);
   
-  // Stelle sicher, dass niemals null oder undefined als Body gesendet wird.
-  // Lidarr erwartet immer ein JSON-Objekt.
+  // Finale Sicherheitsprüfung: Sende immer ein gültiges JSON-Objekt.
+  // Auch bei einem Fehler ist `lidarr` jetzt ein serialisierbares Objekt.
   res.status(status).headers(responseHeaders).send(lidarr || {});
 }
 
 async function doScrobbler(req: FastifyRequest, res: FastifyReply) {
-    // Implementierung für Scrobbler... (kann ähnlich wie doApi aufgebaut werden)
     res.status(501).send({error: "Not implemented"});
 }
 
-// Handler für alle Methoden, um GET, POST, etc. abzufangen
 fastify.all('*', async (req: FastifyRequest, res: FastifyReply) => {
-  const host = req.headers["x-proxy-host"];
-  if (host === "ws.audioscrobbler.com") {
-    return doScrobbler(req, res);
+  try {
+    const host = req.headers["x-proxy-host"];
+    if (host === "ws.audioscrobbler.com") {
+      await doScrobbler(req, res);
+    } else {
+      await doApi(req, res);
+    }
+  } catch (error) {
+      // Fange alle nicht behandelten Fehler in der Route ab und leite sie an den Handler weiter
+      res.send(error);
   }
-  return doApi(req, res);
 });
-
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
   if (err) {
