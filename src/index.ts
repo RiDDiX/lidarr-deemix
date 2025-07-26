@@ -54,7 +54,8 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
   try {
     upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { 
       method, 
-      body: req.body as (string | null), 
+      // === KORRIGIERTE ZEILE ===
+      body: req.body ? req.body as string : undefined, 
       headers: nh 
     });
     status = upstreamResponse.status;
