@@ -6,7 +6,7 @@ import { getArtistData } from "./artistData.js";
 import { mergeAlbumLists } from "./helpers.js";
 import { getAllLidarrArtists } from "./lidarr.js";
 
-const deemixUrl = process.env.DEEMIX_URL || "http://12.0.0.1:7272";
+const deemixUrl = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
 
 // Stabile Fetch-Funktion für die interne Deemix-API
 async function safeDeemixFetch(path: string) {
