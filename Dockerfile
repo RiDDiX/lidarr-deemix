@@ -6,13 +6,14 @@ FROM python:3.12-alpine AS builder
 
 WORKDIR /app
 
-# Installiere Build-Tools
+# Installiere Build-Tools (inkl. openssl-dev)
 RUN apk add --no-cache \
-    nodejs \
-    npm \
+    bash \
     build-base \
     libffi-dev \
-    bash
+    nodejs \
+    npm \
+    openssl-dev
 
 # Installiere pnpm global
 RUN npm i -g pnpm
