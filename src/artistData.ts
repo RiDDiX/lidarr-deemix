@@ -11,15 +11,20 @@ export interface AlbumDTO {
   Type: string;
 }
 
-function fakeId(id: string | number, type: string): string {
-  let p = "a";
-  if (type === "album") p = "b";
-  if (type === "track") p = "c";
-  if (type === "release") p = "d";
-  if (type === "recording") p = "e";
-  const idStr = `${id}`.padStart(12, p);
-  return `${"".padStart(8, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${idStr}`;
+/**
+ * Erzeugt eine garantiert einzigartige Fake-ID für MusicBrainz-Einträge.
+ * Nutzt einen Hex-String und ein "MB"-Präfix zur Unterscheidung von Deemix.
+ */
+function fakeId(id: string, type: string): string {
+  // Eindeutiges Präfix für MusicBrainz
+  const prefix = "mbid";
+  // Konvertiere die MusicBrainz-UUID in einen reinen Hex-String
+  const hexId = id.replace(/-/g, "");
+  // Erstelle eine UUID-ähnliche Struktur, die garantiert nicht mit echten UUIDs kollidiert.
+  return `${prefix}${hexId}`.padEnd(36, '0').slice(0, 36)
+    .replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
 }
+
 
 function deduplicateAlbums(albums: AlbumDTO[]): AlbumDTO[] {
   const deduped: AlbumDTO[] = [];
@@ -44,7 +49,6 @@ export async function getArtistData(query: string): Promise<any> {
     const artistSearchUrl = `${MB_BASE_URL}/artist?query=artist:${encodeURIComponent(query)}&fmt=json`;
     const artistRes = await fetch(artistSearchUrl, {
         headers: {
-            // MusicBrainz erfordert einen User-Agent
             'User-Agent': 'LidarrDeemixProxy/1.0 ( https://github.com/RiDDiX/lidarr-deemix )'
         }
     });
@@ -66,11 +70,7 @@ export async function getArtistData(query: string): Promise<any> {
     });
      if (!rgRes.ok) {
         console.error(`MusicBrainz API Fehler (Release Group): ${rgRes.status}`);
-        // Gib den Künstler trotzdem zurück, aber ohne Alben
-        return {
-            // ... (Künstlerdaten wie unten) ...
-            Albums: []
-        };
+        return { Albums: [], ...artist }; // Gib zumindest den Künstler zurück
     }
     const rgData = await rgRes.json();
     let albums: AlbumDTO[] = [];
@@ -90,14 +90,12 @@ export async function getArtistData(query: string): Promise<any> {
       albums = deduplicateAlbums(albums);
     }
 
-    // === DIE ENTSCHEIDENDE KORREKTUR ===
-    // Wir extrahieren nur die Namen aus den Alias-Objekten, um eine einfache Liste von Strings zu erstellen.
     const artistAliases = (artist.aliases || []).map((alias: { name: string }) => alias.name);
 
     return {
       id: fakeId(artist.id, "artist"),
       artistname: artist.name,
-      artistaliases: artistAliases, // Hier wird die korrigierte Liste verwendet
+      artistaliases: artistAliases,
       disambiguation: artist.disambiguation || "",
       genres: [],
       images: [],
