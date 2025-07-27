@@ -43,7 +43,7 @@ async function deemixArtists(name: string): Promise<any[]> {
 
 async function getDeemixTracks(albumId: string): Promise<any[]> {
     const data = await safeDeemixFetch(`/album/${albumId}/tracks`);
-    return data?.data || [];
+    return data?.data || []; // Stellt sicher, dass immer ein Array zurückgegeben wird
 }
 
 // Baut ein vollständiges und für Lidarr valides Künstler-Objekt aus Deemix-Daten
@@ -51,10 +51,11 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const j = await safeDeemixFetch(`/artists/${deemixId}`);
     if (!j) return null;
 
-    // Wir holen für jedes Album die volle Detailtiefe, genau wie es Lidarr erwartet.
     const albumsData = await Promise.all((j.albums?.data || []).map(async (a: any) => {
       const title = titleCase(a.title);
-      const tracks = await getDeemixTracks(a.id);
+      // === DER ALLERLETZTE, ENTSCHEIDENDE FIX ===
+      // Wir stellen sicher, dass 'tracks' IMMER ein Array ist, auch wenn die API nichts liefert.
+      const tracks = await getDeemixTracks(a.id) || [];
       
       return {
         Id: fakeId(a.id, "album"),
@@ -63,7 +64,6 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         ReleaseStatuses: ["Official"],
         SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
         Type: a.record_type === 'ep' ? 'EP' : titleCase(a.record_type || 'album'),
-        // === DER FINALE FIX: Ein vollständiges Release-Objekt, wie im Original von ad-on-is ===
         releases: [{
             Id: fakeId(a.id, "release"),
             Title: title,
@@ -75,7 +75,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
               Name: "",
               Position: t.disk_number,
               track_count: tracks.filter(tr => tr.disk_number === t.disk_number).length,
-              tracks: (tracks || []).filter(tr => tr.disk_number === t.disk_number).map((track: any, idx: number) => ({
+              tracks: tracks.filter(tr => tr.disk_number === t.disk_number).map((track: any) => ({
                   artistid: fakeId(j.id, "artist"),
                   durationms: track.duration * 1000,
                   id: fakeId(track.id, "track"),
