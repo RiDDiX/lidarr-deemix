@@ -53,7 +53,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
 
     const albumsData = await Promise.all((j.albums?.data || []).map(async (a: any) => {
       const title = titleCase(a.title);
-      const tracks = await getDeemixTracks(a.id) || []; // Stellt sicher, dass tracks immer ein Array ist
+      const tracks = await getDeemixTracks(a.id) || [];
       
       return {
         Id: fakeId(a.id, "album"),
@@ -68,15 +68,14 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             track_count: tracks.length,
             country: ["Worldwide"],
             status: "Official",
-            // === DIE FINALE KORREKTUR: Die exakte, funktionierende Struktur von ad-on-is ===
-            // 'media' und 'tracks' sind Geschwister, nicht verschachtelt.
             media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
               Format: "Digital Media",
               Name: "",
               Position: t.disk_number,
             })),
+            // === DER FINALE FIX: Die exakte, funktionierende Track-Struktur von ad-on-is ===
             tracks: tracks.map((track: any, idx: number) => ({
-                artistid: fakeId(j.id, "artist"),
+                artistid: fakeId(j.id, "artist"), // Bezieht sich auf den Hauptkünstler
                 durationms: track.duration * 1000,
                 id: fakeId(track.id, "track"),
                 mediumnumber: track.disk_number,
@@ -84,6 +83,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                 oldrecordingids: [],
                 recordingid: fakeId(track.id, "recording"),
                 trackname: track.title,
+                // Wichtig: Lidarr verlässt sich auf eine saubere Nummerierung, der Index ist am sichersten
                 tracknumber: `${idx + 1}`,
                 trackposition: idx + 1,
             })),
