@@ -21,20 +21,12 @@ async function safeDeemixFetch(path: string) {
     }
 }
 
-/**
- * Erzeugt eine garantiert einzigartige Fake-ID für Deemix-Einträge.
- * Nutzt einen Hex-String und ein "DD"-Präfix zur Unterscheidung von MusicBrainz.
- */
 function fakeId(id: string | number, type: string): string {
-    // Eindeutiges Präfix für Deemix
     const prefix = "deez";
-    // Konvertiere die ID in einen Hex-String
     const hexId = Number(id).toString(16);
-    // Erstelle eine UUID-ähnliche Struktur
     return `${prefix}${hexId}`.padEnd(36, '0').slice(0, 36)
       .replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
 }
-
 
 function deduplicateAlbums(albums: any[]): any[] {
   const deduped: any[] = [];
@@ -52,7 +44,6 @@ export async function deemixArtists(name: string): Promise<any[]> {
 }
 
 export async function deemixAlbum(id: string): Promise<any> {
-  // Die ID von Lidarr könnte unser Fake-Format haben, wir müssen die echte Deezer-ID extrahieren
   const realId = id.includes('deez') ? parseInt(id.replace(/deez|-/g, ''), 16).toString() : id;
   return await safeDeemixFetch(`/albums/${realId}`);
 }
@@ -178,14 +169,12 @@ export async function getAlbum(id: string): Promise<any> {
       id: lidarr["id"],
       artistname: lidarr["artistname"] || lidarr["artistName"],
       sortname: (lidarr["artistname"] || lidarr["artistName"]).split(" ").reverse().join(", "),
-      //...
     };
   } else if(lidarr) {
     lidarrArtist = {
       id: lidarr["foreignArtistId"] || lidarr["id"],
       artistname: lidarr["artistName"] || lidarr["artistname"],
       sortname: (lidarr["artistName"] || lidarr["artistname"]).split(" ").reverse().join(", "),
-      //...
     };
   } else {
       const primaryArtist = contributors.length > 0 ? contributors[0] : { id: 'unknown', artistname: 'Unknown Artist', sortname: 'Artist, Unknown'};
@@ -275,7 +264,7 @@ export async function search(lidarr: any[], query: string, isManual: boolean = t
       }
       lartist["artist"]["oldids"].push(fakeId(dartist["id"], "artist"));
     }
-    lidarr[lidx] = lartist;
+    if (lidx > -1) lidarr[lidx] = lartist;
   }
 
   if (didx > -1) {
@@ -303,14 +292,14 @@ export async function search(lidarr: any[], query: string, isManual: boolean = t
 }
 
 export async function getArtist(lidarr: any): Promise<any> {
-  // Diese Funktion scheint nicht mehr direkt verwendet zu werden, aber wir lassen sie mal drin.
   const artistName = lidarr?.["artistname"];
   if (!artistName) return null;
 
   const mbArtist = await getArtistData(artistName);
   if (mbArtist) {
-    const deemixAlbums = await getAlbums(artistName);
-    mbArtist.Albums = mergeAlbumLists(mbArtist.Albums, deemixAlbums);
+    // === KORRIGIERTE ZEILE ===
+    const albums = await deemixAlbums(artistName); 
+    mbArtist.Albums = mergeAlbumLists(mbArtist.Albums, albums);
     return mbArtist;
   } else {
     return await deemixArtist(artistName);
