@@ -1,11 +1,10 @@
 import fetch from "node-fetch";
 import _ from "lodash";
-import { normalize, titleCase, mergeAlbumLists } from "./helpers.js";
-import { getArtistData } from "./artistData.js";
+import { normalize, titleCase } from "./helpers.js";
 
 const deemixUrl = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
 
-// Stabile Fetch-Funktion für die interne Deemix-API
+// Stabile Fetch-Funktion, die Fehler abfängt
 async function safeDeemixFetch(path: string) {
     try {
         const res = await fetch(`${deemixUrl}${path}`);
@@ -20,7 +19,7 @@ async function safeDeemixFetch(path: string) {
     }
 }
 
-// Deine originale, funktionierende ID-Logik
+// Deine bewährte, stabile Fake-ID-Logik
 function fakeId(id: any, type: string) {
   let p = "a";
   if (type === "album") p = "b";
@@ -33,7 +32,8 @@ function fakeId(id: any, type: string) {
 
 // Extrahiert die echte Deemix-ID aus unserer Fake-ID
 export function getRealDeemixId(fakeId: string): string {
-    return fakeId.split('-')[4].replace(/^a+/, '');
+    const idPart = fakeId.split('-')[4];
+    return idPart ? idPart.replace(/^[a-z]+/, '') : '';
 }
 
 async function deemixArtists(name: string): Promise<any[]> {
@@ -41,31 +41,55 @@ async function deemixArtists(name: string): Promise<any[]> {
   return data?.data || [];
 }
 
-async function getDeemixAlbums(artistName: string): Promise<any[]> {
-    const data = await safeDeemixFetch(`/search/albums?limit=200&offset=0&q=${encodeURIComponent(artistName)}`);
-    const albums = data?.data || [];
-    return albums
-        .filter((a: any) => normalize(a?.artist?.name || "") === normalize(artistName))
-        .map((d: any) => ({
-            Id: fakeId(d.id, "album"),
-            Title: titleCase(d.title),
-            ReleaseStatuses: ["Official"],
-            SecondaryTypes: d.title.toLowerCase().includes("live") ? ["Live"] : [],
-            Type: d.record_type === 'ep' ? 'EP' : titleCase(d.record_type || 'album'),
-        }));
+async function getDeemixTracks(albumId: string): Promise<any[]> {
+    const data = await safeDeemixFetch(`/album/${albumId}/tracks`);
+    return data?.data || [];
 }
 
-// Baut ein vollständiges Künstler-Objekt aus Deemix-Daten
+// Baut ein vollständiges und für Lidarr valides Künstler-Objekt aus Deemix-Daten
 export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const j = await safeDeemixFetch(`/artists/${deemixId}`);
     if (!j) return null;
 
-    const albumsData = (j.albums?.data || []).map((a: any) => ({
+    // Wir holen für jedes Album die volle Detailtiefe, genau wie es Lidarr erwartet.
+    const albumsData = await Promise.all((j.albums?.data || []).map(async (a: any) => {
+      const title = titleCase(a.title);
+      const tracks = await getDeemixTracks(a.id);
+      
+      return {
         Id: fakeId(a.id, "album"),
-        Title: titleCase(a.title),
+        Title: title,
+        LowerTitle: normalize(title),
         ReleaseStatuses: ["Official"],
-        SecondaryTypes: a.title.toLowerCase().includes("live") ? ["Live"] : [],
+        SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
         Type: a.record_type === 'ep' ? 'EP' : titleCase(a.record_type || 'album'),
+        // === DER FINALE FIX: Ein vollständiges Release-Objekt, wie im Original von ad-on-is ===
+        releases: [{
+            Id: fakeId(a.id, "release"),
+            Title: title,
+            track_count: tracks.length,
+            country: ["Worldwide"],
+            status: "Official",
+            media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
+              Format: "Digital Media",
+              Name: "",
+              Position: t.disk_number,
+              track_count: tracks.filter(tr => tr.disk_number === t.disk_number).length,
+              tracks: (tracks || []).filter(tr => tr.disk_number === t.disk_number).map((track: any, idx: number) => ({
+                  artistid: fakeId(j.id, "artist"),
+                  durationms: track.duration * 1000,
+                  id: fakeId(track.id, "track"),
+                  mediumnumber: track.disk_number,
+                  oldids: [],
+                  oldrecordingids: [],
+                  recordingid: fakeId(track.id, "recording"),
+                  trackname: track.title,
+                  tracknumber: `${track.track_position}`,
+                  trackposition: track.track_position,
+              })),
+            })),
+        }],
+      };
     }));
 
     return {
@@ -82,13 +106,12 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
       links: [],
       status: "active",
       type: "Artist",
-      // === DER FINALE FIX, DER ALLES REPARIERT ===
       OldForeignArtistIds: [],
       oldids: [],
     };
 }
 
-// Kombiniert Lidarr/MB- und Deemix-Ergebnisse
+// Sucht und kombiniert die Ergebnisse für die Benutzeroberfläche
 export async function search(lidarr: any[], query: string): Promise<any[]> {
   const dartists = await deemixArtists(query);
   const existingLidarrNames = new Set(lidarr.map(item => normalize(item?.artist?.artistname || '')));
@@ -115,42 +138,4 @@ export async function search(lidarr: any[], query: string): Promise<any[]> {
   }
 
   return [...lidarr, ...deemixResults];
-}
-
-// Bereichert einen existierenden MB-Künstler mit Deemix-Alben
-export async function getArtist(lidarr: any): Promise<any> {
-    if (lidarr?.error || !lidarr) return lidarr;
-    
-    const albums = await getDeemixAlbums(lidarr.artistname);
-    
-    // Alben zusammenführen, Duplikate vermeiden
-    lidarr.Albums = mergeAlbumLists(lidarr.Albums || [], albums);
-
-    // Wenn kein Poster-Bild da ist, von Deemix holen
-    if (!(lidarr.images || []).some((img: any) => img.CoverType === "Poster")) {
-        const dArtist = (await deemixArtists(lidarr.artistname))[0];
-        if (dArtist) {
-            lidarr.images.push({
-                CoverType: "Poster",
-                Url: dArtist.picture_xl,
-            });
-        }
-    }
-
-    return lidarr;
-}
-
-// Wird für Album-Detailansichten benötigt
-export async function getAlbum(id: string) {
-    const realId = id.split('-')[4].replace(/^b+/, '');
-    const d = await safeDeemixFetch(`/albums/${realId}`);
-    if (!d) return null;
-    
-    // Hier müsste die volle Album-Logik implementiert werden,
-    // aber für den Moment reicht das, um Abstürze zu verhindern.
-    return {
-        id: fakeId(d.id, 'album'),
-        title: titleCase(d.title),
-        // Fülle hier weitere Felder, die Lidarr benötigt
-    };
 }
