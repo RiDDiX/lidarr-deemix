@@ -83,7 +83,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             // === DER FINALE FIX: Die exakte, funktionierende Track-Struktur von ad-on-is ===
             // Wir ignorieren die 'track_position' von der API und verwenden den Array-Index.
             tracks: tracks.map((track: any, idx: number) => ({
-                artistid: fakeId(j.id, "artist"),
+                artistid: fakeId(j.id, "artist"), // Bezieht sich auf den Hauptkünstler
                 durationms: (track.duration || 0) * 1000,
                 id: fakeId(track.id, "track"),
                 mediumnumber: track.disk_number || 1,
