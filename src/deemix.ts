@@ -23,7 +23,9 @@ async function safeDeemixFetch(path: string) {
 function fakeId(id: any, type: string) {
   let p = "a";
   if (type === "album") p = "b";
-  if (type === "release") p = "d"; // 'd' für release wie im Original
+  if (type === "track") p = "c";
+  if (type === "release") p = "d";
+  if (type === "recording") p = "e";
   id = `${id}`.padStart(12, p);
   return `${"".padStart(8, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${id}`;
 }
@@ -48,9 +50,11 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const j = await safeDeemixFetch(`/artists/${deemixId}`);
     if (!j) return null;
 
+    // Wir holen für jedes Album die volle Detailtiefe, genau wie es Lidarr erwartet.
     const albumsData = await Promise.all((j.albums?.data || []).map(async (a: any) => {
       const title = titleCase(a.title);
       const tracks = await getDeemixTracks(a.id);
+      
       return {
         Id: fakeId(a.id, "album"),
         Title: title,
@@ -58,9 +62,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         ReleaseStatuses: ["Official"],
         SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
         Type: a.record_type === 'ep' ? 'EP' : titleCase(a.record_type || 'album'),
-        // === DER FINALE FIX: Ein vollständiges Release-Objekt ===
-        // Lidarr erwartet eine 'releases'-Liste für jedes Album,
-        // und jedes Release muss eine 'media'-Liste haben.
+        // === DER ENTSCHEIDENDE FIX: Ein vollständiges Release-Objekt, wie im Original von ad-on-is ===
         releases: [{
             Id: fakeId(a.id, "release"),
             Title: title,
@@ -72,6 +74,18 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
               Name: "",
               Position: t.disk_number,
               track_count: tracks.filter(tr => tr.disk_number === t.disk_number).length,
+              tracks: (tracks || []).filter(tr => tr.disk_number === t.disk_number).map((track: any, idx: number) => ({
+                  artistid: fakeId(j.id, "artist"),
+                  durationms: track.duration * 1000,
+                  id: fakeId(track.id, "track"),
+                  mediumnumber: track.disk_number,
+                  oldids: [],
+                  oldrecordingids: [],
+                  recordingid: fakeId(track.id, "recording"),
+                  trackname: track.title,
+                  tracknumber: `${track.track_position}`,
+                  trackposition: track.track_position,
+              })),
             })),
         }],
       };
