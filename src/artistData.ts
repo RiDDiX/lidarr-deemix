@@ -39,6 +39,8 @@ export async function getArtistData(mbid: string): Promise<any> {
       images: [],
       status: "active",
       type: "Artist",
+      // === DER FINALE FIX (AUCH HIER NÖTIG) ===
+      OldForeignArtistIds: [],
     };
   } catch (error) {
     console.error(`Fehler beim Abrufen der MusicBrainz-Daten für MBID ${mbid}:`, error);
