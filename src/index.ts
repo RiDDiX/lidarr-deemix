@@ -1,12 +1,13 @@
 import fetch, { Response } from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import dotenv from "dotenv";
-import { search, getFullArtist } from "./deemix.js";
+import { search, getDeemixArtistById } from "./deemix.js";
+import { getArtistData } from "./artistData.js";
+import { mergeAlbumLists } from "./helpers.js";
 
 dotenv.config();
 
 const lidarrApiUrl = "https://api.lidarr.audio";
-
 const fastify = Fastify({ logger: false });
 
 fastify.setErrorHandler((error, request, reply) => {
@@ -31,14 +32,24 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
 
     if (url.includes("/v0.4/artist/")) {
         const artistId = u.pathname.split('/').pop() || '';
-        const foreignArtistId = u.searchParams.get('foreignArtistId') || ''; // Schau, ob wir eine Deemix-ID haben
-        finalResult = await getFullArtist(artistId, foreignArtistId);
-    } else {
-        let lidarrResults: any[] = [];
+        
+        // === DER KERN DER LOGIK ===
+        if (artistId.startsWith('aaaaaaaa')) { // Ist es unsere Fake Deemix ID?
+            console.log(`Erkenne Deemix-Künstler. Extrahiere echte ID aus ${artistId}...`);
+            const realDeemixId = getRealDeemixId(artistId);
+            finalResult = await getDeemixArtistById(realDeemixId);
+        } else { // Ansonsten ist es eine normale MusicBrainz ID
+            const mbArtist = await getArtistData(artistId);
+            // Optional: Hier könnten wir mbArtist noch mit Deemix-Alben anreichern
+            finalResult = mbArtist;
+        }
+
+    } else { // Alle anderen Anfragen (inkl. Suche)
+        let lidarrResults: any = [];
         try {
             const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { method, headers: nh, timeout: 8000 });
             if (upstreamResponse.ok) {
-                lidarrResults = await upstreamResponse.json() as any[];
+                lidarrResults = (await upstreamResponse.json()) || [];
             }
         } catch (e) {
             console.warn("Lidarr API nicht erreichbar, fahre nur mit Deemix fort.");
@@ -46,7 +57,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
 
         if (url.includes("/v0.4/search")) {
             const queryParam = u.searchParams.get("query") || "";
-            finalResult = await search(lidarrResults, queryParam);
+            finalResult = await search(Array.isArray(lidarrResults) ? lidarrResults : [], queryParam);
         } else {
             finalResult = lidarrResults;
         }
