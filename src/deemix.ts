@@ -51,6 +51,20 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const j = await safeDeemixFetch(`/artists/${deemixId}`);
     if (!j) return null;
 
+    // ======================= ANPASSUNG =======================
+    // Erstelle ein kompaktes Künstler-Objekt, das wir jedem Album hinzufügen.
+    // Lidarr erwartet diese Information auf Album-Ebene.
+    const artistForAlbum = {
+      id: fakeId(j.id, "artist"),
+      artistname: j.name,
+      foreignArtistId: fakeId(j.id, "artist"),
+      sortname: j.name.split(" ").reverse().join(", "),
+      status: "active",
+      type: "Artist",
+    };
+    // =================== ENDE DER ANPASSUNG ===================
+
+
     const albumsData = await Promise.all((j.albums?.data || []).map(async (a: any) => {
       const albumDetails = await safeDeemixFetch(`/albums/${a.id}`);
       if (!albumDetails) return null;
@@ -65,6 +79,14 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         ReleaseStatuses: ["Official"],
         SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
         Type: albumDetails.record_type === 'ep' ? 'EP' : titleCase(albumDetails.record_type || 'album'),
+        
+        // ======================= ANPASSUNG =======================
+        // Füge hier die Künstler-Informationen zum Album-Objekt hinzu.
+        // Das ist der entscheidende Fix für den "NullReferenceException"-Fehler.
+        artistid: fakeId(j.id, "artist"),
+        artists: [artistForAlbum],
+        // =================== ENDE DER ANPASSUNG ===================
+
         releases: [{
             Id: fakeId(albumDetails.id, "release"),
             Title: title,
@@ -80,10 +102,8 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
               Name: "",
               Position: t.disk_number || 1,
             })),
-            // === DER FINALE FIX: Die exakte, funktionierende Track-Struktur von ad-on-is ===
-            // 'tracks' ist ein direktes Kind von 'release', NICHT von 'media'.
             tracks: tracks.map((track: any, idx: number) => ({
-                artistid: fakeId(j.id, "artist"), // Bezieht sich auf den Hauptkünstler
+                artistid: fakeId(j.id, "artist"),
                 durationms: (track.duration || 0) * 1000,
                 id: fakeId(track.id, "track"),
                 mediumnumber: track.disk_number || 1,
