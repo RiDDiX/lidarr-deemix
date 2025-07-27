@@ -1,10 +1,10 @@
 import fetch from "node-fetch";
 import _ from "lodash";
-import { normalize, titleCase, mergeAlbumLists } from "./helpers.js";
-import { getArtistData } from "./artistData.js";
+import { normalize, titleCase } from "./helpers.js";
 
 const deemixUrl = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
 
+// Stabile Fetch-Funktion, die Fehler abfängt
 async function safeDeemixFetch(path: string) {
     try {
         const res = await fetch(`${deemixUrl}${path}`);
@@ -19,16 +19,16 @@ async function safeDeemixFetch(path: string) {
     }
 }
 
+// Deine bewährte, stabile Fake-ID-Logik
 function fakeId(id: any, type: string) {
   let p = "a";
   if (type === "album") p = "b";
-  if (type === "track") p = "c";
-  if (type === "release") p = "d";
-  if (type === "recording") p = "e";
+  if (type === "release") p = "d"; // 'd' für release wie im Original
   id = `${id}`.padStart(12, p);
   return `${"".padStart(8, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${id}`;
 }
 
+// Extrahiert die echte Deemix-ID aus unserer Fake-ID
 export function getRealDeemixId(fakeId: string): string {
     return fakeId.split('-')[4].replace(/^a+/, '');
 }
@@ -43,6 +43,7 @@ async function getDeemixTracks(albumId: string): Promise<any[]> {
     return data?.data || [];
 }
 
+// Baut ein vollständiges und für Lidarr valides Künstler-Objekt aus Deemix-Daten
 export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const j = await safeDeemixFetch(`/artists/${deemixId}`);
     if (!j) return null;
@@ -58,6 +59,8 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
         Type: a.record_type === 'ep' ? 'EP' : titleCase(a.record_type || 'album'),
         // === DER FINALE FIX: Ein vollständiges Release-Objekt ===
+        // Lidarr erwartet eine 'releases'-Liste für jedes Album,
+        // und jedes Release muss eine 'media'-Liste haben.
         releases: [{
             Id: fakeId(a.id, "release"),
             Title: title,
@@ -93,6 +96,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     };
 }
 
+// Sucht und kombiniert die Ergebnisse für die Benutzeroberfläche
 export async function search(lidarr: any[], query: string): Promise<any[]> {
   const dartists = await deemixArtists(query);
   const existingLidarrNames = new Set(lidarr.map(item => normalize(item?.artist?.artistname || '')));
