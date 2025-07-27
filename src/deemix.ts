@@ -1,3 +1,4 @@
+// deemix.ts
 import fetch from "node-fetch";
 import _ from "lodash";
 import { normalize, titleCase } from "./helpers.js";
@@ -43,7 +44,7 @@ async function deemixArtists(name: string): Promise<any[]> {
 
 async function getDeemixTracks(albumId: string): Promise<any[]> {
     const data = await safeDeemixFetch(`/album/${albumId}/tracks`);
-    return data?.data || []; // Stellt sicher, dass immer ein Array zurückgegeben wird
+    return data?.data || [];
 }
 
 // Baut ein vollständiges und für Lidarr valides Künstler-Objekt aus Deemix-Daten
@@ -53,9 +54,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
 
     const albumsData = await Promise.all((j.albums?.data || []).map(async (a: any) => {
       const title = titleCase(a.title);
-      // === DER ALLERLETZTE, ENTSCHEIDENDE FIX ===
-      // Wir stellen sicher, dass 'tracks' IMMER ein Array ist, auch wenn die API nichts liefert.
-      const tracks = await getDeemixTracks(a.id) || [];
+      const tracks = await getDeemixTracks(a.id);
       
       return {
         Id: fakeId(a.id, "album"),
@@ -64,6 +63,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         ReleaseStatuses: ["Official"],
         SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
         Type: a.record_type === 'ep' ? 'EP' : titleCase(a.record_type || 'album'),
+        // === DER FINALE FIX: Die exakte, funktionierende Struktur von ad-on-is ===
         releases: [{
             Id: fakeId(a.id, "release"),
             Title: title,
@@ -74,19 +74,19 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
               Format: "Digital Media",
               Name: "",
               Position: t.disk_number,
-              track_count: tracks.filter(tr => tr.disk_number === t.disk_number).length,
-              tracks: tracks.filter(tr => tr.disk_number === t.disk_number).map((track: any) => ({
-                  artistid: fakeId(j.id, "artist"),
-                  durationms: track.duration * 1000,
-                  id: fakeId(track.id, "track"),
-                  mediumnumber: track.disk_number,
-                  oldids: [],
-                  oldrecordingids: [],
-                  recordingid: fakeId(track.id, "recording"),
-                  trackname: track.title,
-                  tracknumber: `${track.track_position}`,
-                  trackposition: track.track_position,
-              })),
+            })),
+            // 'tracks' ist ein direktes Kind von 'release', NICHT von 'media'
+            tracks: (tracks || []).map((track: any, idx: number) => ({
+                artistid: fakeId(j.id, "artist"),
+                durationms: track.duration * 1000,
+                id: fakeId(track.id, "track"),
+                mediumnumber: track.disk_number,
+                oldids: [],
+                oldrecordingids: [],
+                recordingid: fakeId(track.id, "recording"),
+                trackname: track.title,
+                tracknumber: `${idx + 1}`,
+                trackposition: idx + 1,
             })),
         }],
       };
