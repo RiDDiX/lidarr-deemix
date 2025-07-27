@@ -81,7 +81,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
               Position: t.disk_number || 1,
             })),
             // === DER FINALE FIX: Die exakte, funktionierende Track-Struktur von ad-on-is ===
-            // 'tracks' ist ein direktes Kind von 'release', NICHT von 'media'.
+            // Wir ignorieren die 'track_position' von der API und verwenden den Array-Index.
             tracks: tracks.map((track: any, idx: number) => ({
                 artistid: fakeId(j.id, "artist"),
                 durationms: (track.duration || 0) * 1000,
@@ -91,8 +91,8 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                 oldrecordingids: [],
                 recordingid: fakeId(track.id, "recording"),
                 trackname: track.title || "Unknown Track",
-                tracknumber: `${track.track_position || idx + 1}`,
-                trackposition: track.track_position || idx + 1,
+                tracknumber: `${idx + 1}`,
+                trackposition: idx + 1,
             })),
         }],
       };
@@ -107,7 +107,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
       overview: "Von Deemix importierter Künstler.",
       artistaliases: [],
       images: [{ CoverType: "Poster", Url: j.picture_xl }],
-      Albums: albumsData.filter(Boolean), // Filtere null-Werte raus, falls ein Album-Fetch fehlschlägt
+      Albums: albumsData.filter(Boolean),
       genres: [],
       links: [],
       status: "active",
