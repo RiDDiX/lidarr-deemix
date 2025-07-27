@@ -1,10 +1,8 @@
-import fetch, { Response } from "node-fetch";
+import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import dotenv from "dotenv";
-
 import { search, getDeemixArtistById, getRealDeemixId } from "./deemix.js";
 import { getArtistData } from "./artistData.js";
-import { mergeAlbumLists } from "./helpers.js";
 
 dotenv.config();
 
@@ -40,7 +38,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
             finalResult = await getDeemixArtistById(realDeemixId);
         } else { 
             const mbArtist = await getArtistData(artistId);
-            
+            // Hier könnte man später noch mit Deemix anreichern, aber erstmal Stabilität
             finalResult = mbArtist;
         }
 
@@ -49,7 +47,8 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
         try {
             const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { method, headers: nh, timeout: 8000 });
             if (upstreamResponse.ok) {
-                lidarrResults = (await upstreamResponse.json()) || [];
+                const parsed = await upstreamResponse.json();
+                lidarrResults = Array.isArray(parsed) ? parsed : [];
             }
         } catch (e) {
             console.warn("Lidarr API nicht erreichbar, fahre nur mit Deemix fort.");
@@ -57,7 +56,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
 
         if (url.includes("/v0.4/search")) {
             const queryParam = u.searchParams.get("query") || "";
-            finalResult = await search(Array.isArray(lidarrResults) ? lidarrResults : [], queryParam);
+            finalResult = await search(lidarrResults, queryParam);
         } else {
             finalResult = lidarrResults;
         }
