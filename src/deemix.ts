@@ -35,8 +35,9 @@ function createFakeAlbumId(deemixId: number | string): string {
     return fakeUuid;
 }
 
+// === KORRIGIERTE ZEILE: export HINZUGEFÜGT ===
 // Extrahiert die echte Deemix-ID aus unserer Fake-ID
-function getRealDeemixId(fakeId: string): string {
+export function getRealDeemixId(fakeId: string): string {
     return fakeId.split('-')[4].replace(/^a+/, '').replace(/^b+/, '');
 }
 

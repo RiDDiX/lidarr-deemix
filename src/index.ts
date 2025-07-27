@@ -1,7 +1,8 @@
 import fetch, { Response } from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import dotenv from "dotenv";
-import { search, getDeemixArtistById } from "./deemix.js";
+
+import { search, getDeemixArtistById, getRealDeemixId } from "./deemix.js";
 import { getArtistData } from "./artistData.js";
 import { mergeAlbumLists } from "./helpers.js";
 
@@ -33,18 +34,17 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
     if (url.includes("/v0.4/artist/")) {
         const artistId = u.pathname.split('/').pop() || '';
         
-        // === DER KERN DER LOGIK ===
-        if (artistId.startsWith('aaaaaaaa')) { // Ist es unsere Fake Deemix ID?
+        if (artistId.startsWith('aaaaaaaa')) { 
             console.log(`Erkenne Deemix-Künstler. Extrahiere echte ID aus ${artistId}...`);
             const realDeemixId = getRealDeemixId(artistId);
             finalResult = await getDeemixArtistById(realDeemixId);
-        } else { // Ansonsten ist es eine normale MusicBrainz ID
+        } else { 
             const mbArtist = await getArtistData(artistId);
-            // Optional: Hier könnten wir mbArtist noch mit Deemix-Alben anreichern
+            
             finalResult = mbArtist;
         }
 
-    } else { // Alle anderen Anfragen (inkl. Suche)
+    } else { 
         let lidarrResults: any = [];
         try {
             const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { method, headers: nh, timeout: 8000 });
