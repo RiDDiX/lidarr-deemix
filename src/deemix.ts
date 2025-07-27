@@ -47,11 +47,16 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
       return {
         Id: fakeId(a.id, "album"),
         Title: title,
-        // === DAS FEHLENDE DETAIL, DAS DEN ABSTURZ VERURSACHT HAT ===
-        LowerTitle: normalize(title), // Lidarr braucht das beim Refresh!
+        LowerTitle: normalize(title),
         ReleaseStatuses: ["Official"],
         SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
         Type: a.record_type === 'ep' ? 'EP' : titleCase(a.record_type || 'album'),
+        // === DER ENTSCHEIDENDE FIX, DER DEN REFRESH REPARIERT ===
+        // Lidarr erwartet eine 'releases'-Liste für jedes Album, auch wenn sie fast leer ist.
+        releases: [{
+            Id: fakeId(a.id, "release"), // Gib ihm eine konsistente ID
+            Title: title,
+        }],
       };
     });
 
