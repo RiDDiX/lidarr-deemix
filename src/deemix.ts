@@ -1,4 +1,3 @@
-// deemix.ts
 import fetch from "node-fetch";
 import _ from "lodash";
 import { normalize, titleCase } from "./helpers.js";
@@ -54,7 +53,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
 
     const albumsData = await Promise.all((j.albums?.data || []).map(async (a: any) => {
       const title = titleCase(a.title);
-      const tracks = await getDeemixTracks(a.id);
+      const tracks = await getDeemixTracks(a.id) || []; // Stellt sicher, dass tracks immer ein Array ist
       
       return {
         Id: fakeId(a.id, "album"),
@@ -63,20 +62,20 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         ReleaseStatuses: ["Official"],
         SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
         Type: a.record_type === 'ep' ? 'EP' : titleCase(a.record_type || 'album'),
-        // === DER FINALE FIX: Die exakte, funktionierende Struktur von ad-on-is ===
         releases: [{
             Id: fakeId(a.id, "release"),
             Title: title,
             track_count: tracks.length,
             country: ["Worldwide"],
             status: "Official",
+            // === DIE FINALE KORREKTUR: Die exakte, funktionierende Struktur von ad-on-is ===
+            // 'media' und 'tracks' sind Geschwister, nicht verschachtelt.
             media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
               Format: "Digital Media",
               Name: "",
               Position: t.disk_number,
             })),
-            // 'tracks' ist ein direktes Kind von 'release', NICHT von 'media'
-            tracks: (tracks || []).map((track: any, idx: number) => ({
+            tracks: tracks.map((track: any, idx: number) => ({
                 artistid: fakeId(j.id, "artist"),
                 durationms: track.duration * 1000,
                 id: fakeId(track.id, "track"),
