@@ -33,16 +33,22 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
         const artistId = u.pathname.split('/').pop() || '';
         
         if (artistId.startsWith('aaaaaaaa')) { 
-            console.log(`Erkenne Deemix-Künstler. Extrahiere echte ID aus ${artistId}...`);
+            console.log(`Anfrage für Deemix-Künstler mit Fake-ID ${artistId}`);
             const realDeemixId = getRealDeemixId(artistId);
             finalResult = await getDeemixArtistById(realDeemixId);
         } else { 
-            const mbArtist = await getArtistData(artistId);
-            // Hier könnte man später noch mit Deemix anreichern, aber erstmal Stabilität
-            finalResult = mbArtist;
+            console.log(`Anfrage für MusicBrainz-Künstler mit MBID ${artistId}`);
+            finalResult = await getArtistData(artistId);
+        }
+        
+        // === DER ENTSCHEIDENDE FIX ===
+        // Wenn wir keinen vollständigen Künstler gefunden haben (egal warum),
+        // senden wir einen 404, damit Lidarr nicht abstürzt.
+        if (finalResult === null) {
+            status = 404;
         }
 
-    } else { 
+    } else { // Alle anderen Anfragen (inkl. Suche)
         let lidarrResults: any = [];
         try {
             const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { method, headers: nh, timeout: 8000 });
@@ -62,11 +68,13 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
         }
     }
     
-    if (finalResult === null || (Array.isArray(finalResult) && finalResult.length === 0)) {
+    // Wenn eine Suche kein Ergebnis liefert, ist 404 trotzdem der korrekte Status.
+    if (Array.isArray(finalResult) && finalResult.length === 0) {
         status = 404;
     }
 
-    res.status(status).send(finalResult || {});
+    console.log(`Finale Antwort für ${url}: Status ${status}`);
+    res.status(status).send(finalResult || {}); // Sende leeres Objekt bei 404
 }
 
 fastify.all('*', async (req: FastifyRequest, res: FastifyReply) => {
