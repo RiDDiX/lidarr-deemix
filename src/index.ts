@@ -9,16 +9,19 @@ import { getArtistData } from "./artistData.js";
 dotenv.config();
 
 const lidarrApiUrl = "https://api.lidarr.audio";
-const scrobblerApiUrl = "https://ws.audioscrobbler.com";
 
 const fastify = Fastify({
-  logger: false, // Wir verwenden console.log für mehr Kontrolle
+  logger: false,
 });
 
 fastify.setErrorHandler((error, request, reply) => {
   console.error("Zentraler Fehler-Handler wurde ausgelöst:", error);
   if (!reply.sent) {
-    reply.status(500).send({ error: "Internal Server Error", message: error.message });
+    const statusCode = error.statusCode || 500;
+    reply.status(statusCode).send({
+      error: error.name || "Internal Server Error",
+      message: error.message,
+    });
   }
 });
 
@@ -37,9 +40,6 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
     const u = new URL(`http://localhost${req.url}`);
     const url = `${u.pathname}${u.search}`;
     const method = req.method;
-    
-    // === DIE ENTSCHEIDENDE ÄNDERUNG ===
-    // Wir tun immer so, als wäre alles gut, und starten mit Status 200 OK.
     let status = 200;
 
     const nh: { [key: string]: any } = {};
@@ -48,71 +48,78 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
     });
 
     let upstreamResponse: Response | null = null;
-    let lidarr: any = null;
+    let finalResult: any = null;
 
+    // Versuche zuerst, die offizielle API abzufragen
     try {
         upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, {
             method,
             body: req.body ? req.body as string : undefined,
             headers: nh,
-            timeout: 10000, // 10 Sekunden Timeout
+            timeout: 10000,
         });
-        
-        if (upstreamResponse.ok) {
-            lidarr = await safeParseJson(upstreamResponse);
-        } else {
-             console.warn(`Upstream API Fehler für ${url}. Status: ${upstreamResponse.status}`);
-             lidarr = null; // Behandle es als Fehler, fahre aber fort.
-        }
+        status = upstreamResponse.status;
+        finalResult = await safeParseJson(upstreamResponse);
 
+        if (!upstreamResponse.ok) {
+             console.warn(`Upstream API Fehler für ${url}. Status: ${status}`);
+        }
     } catch (e) {
         console.error(`Netzwerkfehler oder Timeout beim Abruf von ${lidarrApiUrl}${url}:`, e);
-        lidarr = null; // Setze auf null, damit die Anreicherung von Deemix als Fallback startet.
+        finalResult = null; // Setze auf null, damit der Fallback greift
     }
 
-    // Stelle sicher, dass `lidarr` für Suchen immer ein Array ist.
-    if (url.includes("/search") && !Array.isArray(lidarr)) {
-        lidarr = [];
-    }
+    // === KOMPLETT NEUE LOGIK FÜR /artist/ und /album/ ===
+    // Diese Logik greift, wenn die offizielle API fehlschlägt ODER
+    // wenn wir die Daten anreichern müssen.
 
-    // Die Anreicherungslogik läuft jetzt immer, entweder mit den Daten von Lidarr oder mit einer leeren Liste.
-    let finalResult = lidarr;
-    if (url.includes("/v0.4/search")) {
-        const queryParam = u.searchParams.get("query") || "";
-        finalResult = await search(lidarr, queryParam, url.includes("type=all"));
-    } else if (url.includes("/v0.4/artist/")) {
-        const queryParam = u.searchParams.get("query") || "";
-        const mbArtist = await getArtistData(queryParam);
-        if (mbArtist?.Albums?.length > 0) {
-            finalResult = mbArtist;
-        } else {
-            const id = url.includes("-aaaa-") ? url.split("/").pop()?.split("-").pop()?.replaceAll("a", "") : queryParam;
-            if (id) {
-                finalResult = await deemixArtist(id);
+    if (url.includes("/v0.4/artist/")) {
+        // Extrahiere die ID aus dem Pfad, z.B. /api/v0.4/artist/ID_HIER
+        const artistId = u.pathname.split('/').pop();
+        if (artistId) {
+            console.log(`Rufe Künstlerdetails für ID ${artistId} ab...`);
+            if (artistId.startsWith('deez')) {
+                finalResult = await deemixArtist(artistId);
+            } else if (artistId.startsWith('mbid')) {
+                finalResult = await getArtistData(artistId);
             }
+            // Wenn die offizielle API erfolgreich war, finalResult beibehalten
         }
     } else if (url.includes("/v0.4/album/")) {
-        if (url.includes("-bbbb-")) {
-            const id = url.split("/").pop()?.split("-").pop()?.replaceAll("b", "");
-            if (id) {
-                finalResult = await getAlbum(id);
+        const albumId = u.pathname.split('/').pop();
+        if (albumId) {
+            console.log(`Rufe Albumdetails für ID ${albumId} ab...`);
+            if (albumId.startsWith('deez')) {
+                finalResult = await getAlbum(albumId);
+            } else if (albumId.startsWith('mbid')) {
+                // MusicBrainz Alben werden über den Künstler geholt,
+                // wenn Lidarr hier direkt fragt und die API down ist, können wir wenig tun.
+                // Ein 404 ist hier die korrekte Antwort, wenn die API nicht antwortet.
+                if (finalResult === null) status = 404;
             }
+        }
+    } else if (url.includes("/v0.4/search")) {
+        // Stelle sicher, dass `finalResult` für Suchen immer ein Array ist.
+        const lidarrResults = Array.isArray(finalResult) ? finalResult : [];
+        const queryParam = u.searchParams.get("query") || "";
+        finalResult = await search(lidarrResults, queryParam, url.includes("type=all"));
+    }
+
+    // Setze finalen Status
+    if (finalResult === null || (Array.isArray(finalResult) && finalResult.length === 0)) {
+        // Wenn am Ende nichts gefunden wurde, ist 404 korrekt.
+        // Außer bei einer erfolgreichen leeren Suche, da ist 200 OK.
+        if (status !== 200) {
+           status = 404;
         }
     }
     
-    // Wenn am Ende kein Ergebnis gefunden wurde, setzen wir den Status auf 404.
-    // Lidarr kann damit umgehen und zeigt "No results found" an.
-    if (finalResult === null || (Array.isArray(finalResult) && finalResult.length === 0)) {
-        status = 404;
-    }
-
     const responseHeaders: Record<string, any> = {
         'content-type': 'application/json; charset=utf-8'
     };
     
     console.log(`Anfrage: [${method}] ${url}, Finale Antwort an Lidarr: Status ${status}`);
 
-    // Sende die finale Antwort.
     res.status(status).headers(responseHeaders).send(finalResult || {});
 }
 
