@@ -52,40 +52,46 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     if (!j) return null;
 
     const albumsData = await Promise.all((j.albums?.data || []).map(async (a: any) => {
-      const title = titleCase(a.title);
-      const tracks = await getDeemixTracks(a.id) || [];
+      const albumDetails = await safeDeemixFetch(`/albums/${a.id}`);
+      if (!albumDetails) return null;
+
+      const title = titleCase(albumDetails.title || "Unknown Album");
+      const tracks = await getDeemixTracks(albumDetails.id) || [];
       
       return {
-        Id: fakeId(a.id, "album"),
+        Id: fakeId(albumDetails.id, "album"),
         Title: title,
         LowerTitle: normalize(title),
         ReleaseStatuses: ["Official"],
         SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
-        Type: a.record_type === 'ep' ? 'EP' : titleCase(a.record_type || 'album'),
+        Type: albumDetails.record_type === 'ep' ? 'EP' : titleCase(albumDetails.record_type || 'album'),
         releases: [{
-            Id: fakeId(a.id, "release"),
+            Id: fakeId(albumDetails.id, "release"),
             Title: title,
             track_count: tracks.length,
             country: ["Worldwide"],
             status: "Official",
+            disambiguation: "",
+            label: [albumDetails.label || "Unknown Label"],
+            oldids: [],
+            releasedate: albumDetails.release_date || new Date().toISOString().split('T')[0],
             media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
               Format: "Digital Media",
               Name: "",
-              Position: t.disk_number,
+              Position: t.disk_number || 1,
             })),
             // === DER FINALE FIX: Die exakte, funktionierende Track-Struktur von ad-on-is ===
             tracks: tracks.map((track: any, idx: number) => ({
-                artistid: fakeId(j.id, "artist"), // Bezieht sich auf den Hauptkünstler
-                durationms: track.duration * 1000,
+                artistid: fakeId(j.id, "artist"),
+                durationms: (track.duration || 0) * 1000,
                 id: fakeId(track.id, "track"),
-                mediumnumber: track.disk_number,
+                mediumnumber: track.disk_number || 1,
                 oldids: [],
                 oldrecordingids: [],
                 recordingid: fakeId(track.id, "recording"),
-                trackname: track.title,
-                // Wichtig: Lidarr verlässt sich auf eine saubere Nummerierung, der Index ist am sichersten
-                tracknumber: `${idx + 1}`,
-                trackposition: idx + 1,
+                trackname: track.title || "Unknown Track",
+                tracknumber: `${track.track_position || idx + 1}`,
+                trackposition: track.track_position || idx + 1,
             })),
         }],
       };
@@ -100,7 +106,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
       overview: "Von Deemix importierter Künstler.",
       artistaliases: [],
       images: [{ CoverType: "Poster", Url: j.picture_xl }],
-      Albums: albumsData,
+      Albums: albumsData.filter(Boolean),
       genres: [],
       links: [],
       status: "active",
