@@ -1,8 +1,8 @@
 import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import dotenv from "dotenv";
-import { searchDeemixArtists, getDeemixArtistById, getAlbumById, fakeId } from "./deemix.js";
-import { getArtistData } from "./artistData.js";
+import { searchDeemixArtists, getDeemixArtistById, fakeId } from "./deemix.js";
+import { getArtistData } from "./artistData.js"; // Deine Funktion für MusicBrainz
 import { normalize } from "./helpers.js";
 
 dotenv.config();
@@ -11,9 +11,9 @@ const lidarrApiUrl = "https://api.lidarr.audio";
 const fastify = Fastify({ logger: false });
 
 fastify.setErrorHandler((error, request, reply) => {
-  console.error("Ein unerwarteter Fehler wurde abgefangen:", error);
+  console.error("Unerwarteter Fehler:", error);
   if (!reply.sent) {
-    reply.status(500).send({ error: "Internal Server Error", message: error.message });
+    reply.status(500).send({ error: "Internal Server Error" });
   }
 });
 
@@ -27,81 +27,70 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
         if (!['host', 'connection'].includes(key.toLowerCase())) nh[key] = value;
     });
 
-    // --- FINALE LOGIK MIT PARALLELER SUCHE ---
-
+    // Anfrage für einen bestimmten Künstler
     if (url.includes("/v0.4/artist/")) {
         const artistId = u.pathname.split('/').pop() || '';
-        if (artistId.startsWith('aaaaaaaa')) {
+        if (artistId.startsWith('aaaaaaaa')) { // Deemix ID
             finalResult = await getDeemixArtistById(artistId);
-        } else {
+        } else { // MusicBrainz ID
             finalResult = await getArtistData(artistId);
         }
-    } else if (url.includes("/v0.4/album/")) {
-        const albumId = u.pathname.split('/').pop() || '';
-        if (albumId.startsWith('bbbbbbbb')) {
-             finalResult = await getAlbumById(albumId);
-        } else {
-            try {
-                 const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 });
-                 if (upstreamResponse.ok) finalResult = await upstreamResponse.json();
-            } catch (e) {
-                console.warn(`Timeout oder Fehler bei Album-Abfrage von Lidarr API.`);
-            }
-        }
     }
-    // **OPTIMIERTE SUCHE**
+    // Allgemeine Suchanfrage - hier findet die Geschwindigkeits-Magie statt
     else if (url.includes("/v0.4/search")) {
         const queryParam = u.searchParams.get("query") || "";
         console.log(`Starte parallele Suche für: "${queryParam}"`);
 
-        // Promise für Lidarr/MusicBrainz mit kurzem Timeout
-        const lidarrPromise = fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 })
-            .then(res => res.ok ? res.json() : Promise.resolve([]))
+        // Promise für die Abfrage an api.lidarr.audio (MusicBrainz) mit kurzem Timeout
+        const lidarrPromise = fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 3000 })
+            .then(response => response.ok ? response.json() : [])
             .then(data => (Array.isArray(data) ? data : []))
-            .catch(e => {
-                console.warn("Lidarr API (MusicBrainz) nicht erreichbar oder Timeout. Ignoriere.");
-                return []; // Bei Fehler/Timeout leeres Array zurückgeben
+            .catch(() => {
+                console.warn("Lidarr API (MusicBrainz) nicht erreichbar oder Timeout. Wird ignoriert.");
+                return []; // Wichtig: Bei Fehler ein leeres Array zurückgeben
             });
 
-        // Promise für Deemix
+        // Promise für die Abfrage an unseren Deemix-Server
         const deemixPromise = searchDeemixArtists(queryParam);
 
-        // Auf beide Ergebnisse parallel warten
+        // Auf die Ergebnisse beider Suchen gleichzeitig warten
         const [lidarrResults, deemixArtists] = await Promise.all([lidarrPromise, deemixPromise]);
 
-        console.log(`Parallele Suche beendet: ${lidarrResults.length} von MusicBrainz, ${deemixArtists.length} von Deemix.`);
+        console.log(`Suche beendet: ${lidarrResults.length} von MusicBrainz, ${deemixArtists.length} von Deemix.`);
 
-        // Ergebnisse zusammenführen, Duplikate vermeiden
+        // Ergebnisse zusammenführen und Duplikate vermeiden
         const existingLidarrNames = new Set(lidarrResults.map(item => normalize(item?.artist?.artistname || '')));
         const deemixFormattedResults = [];
 
         for (const d of deemixArtists) {
-            if (existingLidarrNames.has(normalize(d.name))) {
-                continue;
+            if (!existingLidarrNames.has(normalize(d.name))) {
+                deemixFormattedResults.push({
+                    artist: {
+                        id: fakeId(d.id, "artist"),
+                        foreignArtistId: fakeId(d.id, "artist"),
+                        artistname: d.name,
+                        sortname: d.name,
+                        images: [{ CoverType: "Poster", Url: d.picture_xl }],
+                        disambiguation: `Deemix ID: ${d.id}`,
+                        overview: `Von Deemix importierter Künstler. ID: ${d.id}`,
+                        artistaliases: [], genres: [], status: "active", type: "Artist"
+                    },
+                });
             }
-            deemixFormattedResults.push({
-                artist: {
-                    id: fakeId(d.id, "artist"),
-                    foreignArtistId: fakeId(d.id, "artist"),
-                    artistname: d.name,
-                    sortname: d.name,
-                    images: [{ CoverType: "Poster", Url: d.picture_xl }],
-                    disambiguation: `Deemix ID: ${d.id}`,
-                    overview: `Von Deemix importierter Künstler. ID: ${d.id}`,
-                    artistaliases: [], genres: [], status: "active", type: "Artist"
-                },
-            });
         }
         finalResult = [...lidarrResults, ...deemixFormattedResults];
-    } else {
+    }
+    // Alle anderen Anfragen einfach durchleiten
+    else {
          try {
-            const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 });
+            const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 3000 });
             if (upstreamResponse.ok) finalResult = await upstreamResponse.json();
          } catch (e) {
              console.warn(`Generische Anfrage an ${url} fehlgeschlagen.`);
          }
     }
 
+    // Finale Antwort senden
     if (finalResult === null || (Array.isArray(finalResult) && finalResult.length === 0)) {
         res.status(404).send({});
     } else {
@@ -109,7 +98,10 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
     }
 }
 
-fastify.all('*', (req, res) => { doApi(req, res); });
+// Alle Anfragen an unsere Hauptlogik weiterleiten
+fastify.all('*', (req, res) => {
+    doApi(req, res);
+});
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
   if (err) {
