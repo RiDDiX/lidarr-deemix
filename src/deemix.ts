@@ -19,7 +19,7 @@ async function safeDeemixFetch(path: string): Promise<any> {
     }
 }
 
-// Erstellt eine eindeutige Fake-MBID, damit Lidarr die Deemix-Einträge verarbeiten kann
+// Erstellt eine eindeutige Fake-MBID
 export function fakeId(id: any, type: string): string {
   let p = "a"; // artist
   if (type === "album") p = "b";
@@ -37,21 +37,20 @@ function getRealDeemixId(fakeId: string): string {
     return idPart ? idPart.replace(/^[a-z]+/, '') : '';
 }
 
-// Sucht nach Künstlern auf Deemix. Wird von index.ts genutzt.
+// Sucht nach Künstlern auf Deemix
 export async function searchDeemixArtists(name: string): Promise<any[]> {
   const data = await safeDeemixFetch(`/search/artists?limit=25&q=${encodeURIComponent(name)}`);
   return data?.data || [];
 }
 
-// Holt alle Tracks für ein bestimmtes Album.
+// Holt alle Tracks für ein bestimmtes Album
 async function getDeemixTracks(albumId: string): Promise<any[]> {
     const data = await safeDeemixFetch(`/album/${albumId}/tracks`);
     return data?.data || [];
 }
 
 /**
- * Erstellt ein vollständiges Künstler-Objekt aus Deemix-Daten, das mit Lidarr kompatibel ist.
- * Dies ist die Schlüsselfunktion, um das Hinzufügen von Künstlern zu ermöglichen.
+ * Erstellt ein vollständiges, mit Lidarr kompatibles Künstler-Objekt aus Deemix-Daten.
  */
 export async function getDeemixArtistById(fakeArtistId: string): Promise<any | null> {
     const deemixId = getRealDeemixId(fakeArtistId);
@@ -60,7 +59,6 @@ export async function getDeemixArtistById(fakeArtistId: string): Promise<any | n
     const artistData = await safeDeemixFetch(`/artists/${deemixId}`);
     if (!artistData) return null;
 
-    // Diese kleine Künstler-Struktur wird in jedem Album benötigt.
     const artistForAlbum = {
       id: fakeId(artistData.id, "artist"),
       artistname: artistData.name,
@@ -70,12 +68,11 @@ export async function getDeemixArtistById(fakeArtistId: string): Promise<any | n
       type: "Artist",
     };
 
-    // Alle Alben des Künstlers abrufen und formatieren
+    // **HIER WAR DER FEHLER:** Dem Parameter 'album' wurde der Typ 'any' hinzugefügt.
     const albumsData = await Promise.all(
-        (artistData.albums?.data || []).map(album => getAlbumStructure(album.id, artistForAlbum))
+        (artistData.albums?.data || []).map((album: any) => getAlbumStructure(album.id, artistForAlbum))
     );
 
-    // Das finale Künstler-Objekt für Lidarr zusammenbauen
     return {
       id: fakeId(artistData.id, "artist"),
       foreignArtistId: fakeId(artistData.id, "artist"),
@@ -85,7 +82,7 @@ export async function getDeemixArtistById(fakeArtistId: string): Promise<any | n
       overview: `Von Deemix importierter Künstler. ID: ${artistData.id}`,
       artistaliases: [],
       images: [{ CoverType: "Poster", Url: artistData.picture_xl }],
-      Albums: albumsData.filter(Boolean), // Filtere null-Werte heraus, falls eine Album-Abfrage fehlschlägt
+      Albums: albumsData.filter(Boolean),
       genres: [],
       links: [],
       status: "active",
@@ -97,7 +94,6 @@ export async function getDeemixArtistById(fakeArtistId: string): Promise<any | n
 
 /**
  * Erstellt eine vollständige, mit Lidarr kompatible Album-Struktur.
- * Diese Funktion kann für die Künstler-Detailansicht und für die direkte Album-Abfrage genutzt werden.
  */
 async function getAlbumStructure(albumId: string, artistForAlbum: any): Promise<any | null> {
     const albumDetails = await safeDeemixFetch(`/albums/${albumId}`);
@@ -111,7 +107,7 @@ async function getAlbumStructure(albumId: string, artistForAlbum: any): Promise<
         Title: title,
         LowerTitle: normalize(title),
         artistid: artistForAlbum.id,
-        artists: [artistForAlbum], // Entscheidend: Lidarr benötigt diese Information hier!
+        artists: [artistForAlbum],
         ReleaseStatuses: ["Official"],
         SecondaryTypes: albumDetails.record_type === 'ep' ? ['EP'] : (title.toLowerCase().includes("live") ? ["Live"] : []),
         Type: albumDetails.record_type === 'ep' ? 'EP' : titleCase(albumDetails.record_type || 'album'),
