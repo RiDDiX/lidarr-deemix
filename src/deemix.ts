@@ -4,21 +4,23 @@ import { normalize, titleCase } from "./helpers.js";
 
 const deemixUrl = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
 
-async function safeDeemixFetch(path: string): Promise<any> {
+// Stabile Fetch-Funktion, die Fehler abfängt
+async function safeDeemixFetch(path: string) {
     try {
         const res = await fetch(`${deemixUrl}${path}`);
         if (!res.ok) {
-            console.warn(`Deemix-Server antwortete mit Fehler ${res.status} für: ${path}`);
+            console.warn(`Deemix-Server antwortete mit Fehler ${res.status} für Pfad: ${path}`);
             return null;
         }
         return await res.json();
     } catch (e) {
-        console.error(`Fehler bei der Verbindung zum Deemix-Server für: ${path}`, e);
+        console.error(`Fehler bei der Verbindung zum Deemix-Server für Pfad: ${path}`, e);
         return null;
     }
 }
 
-export function fakeId(id: any, type: string): string {
+// Deine bewährte, stabile Fake-ID-Logik
+function fakeId(id: any, type: string) {
   let p = "a";
   if (type === "album") p = "b";
   if (type === "track") p = "c";
@@ -28,13 +30,14 @@ export function fakeId(id: any, type: string): string {
   return `${"".padStart(8, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${id}`;
 }
 
-function getRealDeemixId(fakeId: string): string {
+// Extrahiert die echte Deemix-ID aus unserer Fake-ID
+export function getRealDeemixId(fakeId: string): string {
     const idPart = fakeId.split('-')[4];
     return idPart ? idPart.replace(/^[a-z]+/, '') : '';
 }
 
-export async function searchDeemixArtists(name: string): Promise<any[]> {
-  const data = await safeDeemixFetch(`/search/artists?limit=25&q=${encodeURIComponent(name)}`);
+async function deemixArtists(name: string): Promise<any[]> {
+  const data = await safeDeemixFetch(`/search/artists?limit=100&offset=0&q=${encodeURIComponent(name)}`);
   return data?.data || [];
 }
 
@@ -43,83 +46,122 @@ async function getDeemixTracks(albumId: string): Promise<any[]> {
     return data?.data || [];
 }
 
-export async function getDeemixArtistById(fakeArtistId: string): Promise<any | null> {
-    const deemixId = getRealDeemixId(fakeArtistId);
-    if (!deemixId) return null;
+// Baut ein vollständiges und für Lidarr valides Künstler-Objekt aus Deemix-Daten
+export async function getDeemixArtistById(deemixId: string): Promise<any> {
+    const j = await safeDeemixFetch(`/artists/${deemixId}`);
+    if (!j) return null;
 
-    const artistData = await safeDeemixFetch(`/artists/${deemixId}`);
-    if (!artistData) return null;
-
+    // ======================= ANPASSUNG =======================
+    // Erstelle ein kompaktes Künstler-Objekt, das wir jedem Album hinzufügen.
+    // Lidarr erwartet diese Information auf Album-Ebene.
     const artistForAlbum = {
-      id: fakeId(artistData.id, "artist"),
-      artistname: artistData.name,
-      foreignArtistId: fakeId(artistData.id, "artist"),
-      sortname: artistData.name,
+      id: fakeId(j.id, "artist"),
+      artistname: j.name,
+      foreignArtistId: fakeId(j.id, "artist"),
+      sortname: j.name.split(" ").reverse().join(", "),
       status: "active",
       type: "Artist",
     };
-    
-    // === KORREKTUR DES BUILD-FEHLERS ===
-    // Dem Parameter 'album' wurde explizit der Typ 'any' gegeben.
-    const albumsData = await Promise.all(
-        (artistData.albums?.data || []).map((album: any) => getAlbumStructure(album.id, artistForAlbum))
-    );
+    // =================== ENDE DER ANPASSUNG ===================
 
-    return {
-      id: fakeId(artistData.id, "artist"),
-      foreignArtistId: fakeId(artistData.id, "artist"),
-      artistname: artistData.name,
-      sortname: artistData.name,
-      disambiguation: `Deemix ID: ${artistData.id}`,
-      overview: `Von Deemix importierter Künstler. ID: ${artistData.id}`,
-      artistaliases: [],
-      images: [{ CoverType: "Poster", Url: artistData.picture_xl }],
-      Albums: albumsData.filter(Boolean),
-      genres: [], links: [], status: "active", type: "Artist",
-      oldids: [], OldForeignArtistIds: [],
-    };
-}
 
-async function getAlbumStructure(albumId: string, artistForAlbum: any): Promise<any | null> {
-    const albumDetails = await safeDeemixFetch(`/albums/${albumId}`);
-    if (!albumDetails) return null;
+    const albumsData = await Promise.all((j.albums?.data || []).map(async (a: any) => {
+      const albumDetails = await safeDeemixFetch(`/albums/${a.id}`);
+      if (!albumDetails) return null;
 
-    const title = titleCase(albumDetails.title || "Unbekanntes Album");
-    const tracks = await getDeemixTracks(albumDetails.id) || [];
+      const title = titleCase(albumDetails.title || "Unknown Album");
+      const tracks = await getDeemixTracks(albumDetails.id) || [];
       
-    return {
+      return {
         Id: fakeId(albumDetails.id, "album"),
         Title: title,
         LowerTitle: normalize(title),
-        artistid: artistForAlbum.id,
-        artists: [artistForAlbum],
         ReleaseStatuses: ["Official"],
-        SecondaryTypes: albumDetails.record_type === 'ep' ? ['EP'] : (title.toLowerCase().includes("live") ? ["Live"] : []),
+        SecondaryTypes: title.toLowerCase().includes("live") ? ["Live"] : [],
         Type: albumDetails.record_type === 'ep' ? 'EP' : titleCase(albumDetails.record_type || 'album'),
-        disambiguation: `Deemix ID: ${albumDetails.id}`,
-        overview: `Von Deemix importiertes Album. ID: ${albumDetails.id}`,
-        images: [{ CoverType: "Cover", Url: albumDetails.cover_xl }],
-        releasedate: albumDetails.release_date || new Date().toISOString().split('T')[0],
+        
+        // ======================= ANPASSUNG =======================
+        // Füge hier die Künstler-Informationen zum Album-Objekt hinzu.
+        // Das ist der entscheidende Fix für den "NullReferenceException"-Fehler.
+        artistid: fakeId(j.id, "artist"),
+        artists: [artistForAlbum],
+        // =================== ENDE DER ANPASSUNG ===================
+
         releases: [{
             Id: fakeId(albumDetails.id, "release"),
             Title: title,
             track_count: tracks.length,
-            country: ["Worldwide"], status: "Official", disambiguation: "",
-            label: [albumDetails.label || "Unbekanntes Label"],
+            country: ["Worldwide"],
+            status: "Official",
+            disambiguation: "",
+            label: [albumDetails.label || "Unknown Label"],
             oldids: [],
             releasedate: albumDetails.release_date || new Date().toISOString().split('T')[0],
-            media: _.uniqBy(tracks, "disk_number").map((t: any) => ({ Format: "Digital Media", Name: "", Position: t.disk_number || 1 })),
+            media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
+              Format: "Digital Media",
+              Name: "",
+              Position: t.disk_number || 1,
+            })),
             tracks: tracks.map((track: any, idx: number) => ({
-                artistid: artistForAlbum.id,
+                artistid: fakeId(j.id, "artist"),
                 durationms: (track.duration || 0) * 1000,
                 id: fakeId(track.id, "track"),
                 mediumnumber: track.disk_number || 1,
-                oldids: [], oldrecordingids: [],
+                oldids: [],
+                oldrecordingids: [],
                 recordingid: fakeId(track.id, "recording"),
-                trackname: track.title || "Unbekannter Track",
+                trackname: track.title || "Unknown Track",
                 tracknumber: `${idx + 1}`,
                 trackposition: idx + 1,
             })),
         }],
+      };
+    }));
+
+    return {
+      id: fakeId(j.id, "artist"),
+      foreignArtistId: fakeId(j.id, "artist"),
+      artistname: j.name,
+      sortname: j.name.split(" ").reverse().join(", "),
+      disambiguation: `Deemix ID: ${j.id}`,
+      overview: "Von Deemix importierter Künstler.",
+      artistaliases: [],
+      images: [{ CoverType: "Poster", Url: j.picture_xl }],
+      Albums: albumsData.filter(Boolean),
+      genres: [],
+      links: [],
+      status: "active",
+      type: "Artist",
+      OldForeignArtistIds: [],
+      oldids: [],
     };
+}
+
+// Sucht und kombiniert die Ergebnisse für die Benutzeroberfläche
+export async function search(lidarr: any[], query: string): Promise<any[]> {
+  const dartists = await deemixArtists(query);
+  const existingLidarrNames = new Set(lidarr.map(item => normalize(item?.artist?.artistname || '')));
+  const deemixResults = [];
+
+  for (const d of dartists) {
+    if (existingLidarrNames.has(normalize(d.name))) {
+        continue;
+    }
+    
+    deemixResults.push({
+      artist: {
+        id: fakeId(d.id, "artist"),
+        foreignArtistId: fakeId(d.id, "artist"),
+        artistname: d.name,
+        sortname: (d.name as string).split(" ").reverse().join(", "),
+        images: [{ CoverType: "Poster", Url: d.picture_xl }],
+        disambiguation: `Deemix ID: ${d.id}`,
+        artistaliases: [],
+        genres: [],
+        status: "active",
+      },
+    });
+  }
+
+  return [...lidarr, ...deemixResults];
 }

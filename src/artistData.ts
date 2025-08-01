@@ -1,31 +1,22 @@
 import fetch from "node-fetch";
-import { titleCase } from "./helpers.js";
+import { normalize, titleCase } from "./helpers.js";
 
 const MB_BASE_URL = "https://musicbrainz.org/ws/2";
-const USER_AGENT = 'LidarrDeemixProxy/1.5 ( https://github.com/RiDDiX/lidarr-deemix )';
+const USER_AGENT = 'LidarrDeemixProxy/1.4 ( https://github.com/RiDDiX/lidarr-deemix )';
 
-// Helper, um eine UUID in das von Lidarr erwartete MBID-Format zu bringen
 function createMbid(uuid: string): string {
     return uuid.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5');
 }
 
-/**
- * Ruft Künstlerdaten von der MusicBrainz API ab und formatiert sie für Lidarr.
- */
-export async function getArtistData(mbid: string): Promise<any | null> {
+export async function getArtistData(mbid: string): Promise<any> {
   try {
     const artistUrl = `${MB_BASE_URL}/artist/${mbid}?inc=release-groups+aliases&fmt=json`;
     const res = await fetch(artistUrl, { headers: { 'User-Agent': USER_AGENT } });
-    
-    if (!res.ok) {
-        console.error(`MusicBrainz API antwortete mit Fehler ${res.status} für MBID ${mbid}`);
-        return null;
-    }
+    if (!res.ok) return null;
     
     const artist = await res.json();
     if (!artist) return null;
 
-    // Formatiere die Alben (Release Groups)
     const albums = (artist["release-groups"] || []).map((rg: any) => ({
       Id: createMbid(rg.id),
       Title: titleCase(rg.title),
@@ -34,7 +25,6 @@ export async function getArtistData(mbid: string): Promise<any | null> {
       Type: rg["primary-type"] === 'ep' ? 'EP' : titleCase(rg["primary-type"] || 'album'),
     }));
 
-    // Baue das finale Künstler-Objekt für Lidarr zusammen
     return {
       artistname: artist.name,
       foreignArtistId: createMbid(artist.id),
@@ -49,6 +39,7 @@ export async function getArtistData(mbid: string): Promise<any | null> {
       images: [],
       status: "active",
       type: "Artist",
+      // === DER FINALE FIX (AUCH HIER NÖTIG) ===
       OldForeignArtistIds: [],
       oldids: [],
     };

@@ -1,9 +1,8 @@
 import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import dotenv from "dotenv";
-import { searchDeemixArtists, getDeemixArtistById, fakeId } from "./deemix.js";
+import { search, getDeemixArtistById, getRealDeemixId } from "./deemix.js";
 import { getArtistData } from "./artistData.js";
-import { normalize } from "./helpers.js";
 
 dotenv.config();
 
@@ -11,85 +10,79 @@ const lidarrApiUrl = "https://api.lidarr.audio";
 const fastify = Fastify({ logger: false });
 
 fastify.setErrorHandler((error, request, reply) => {
-  console.error("Unerwarteter Fehler:", error);
+  console.error("Zentraler Fehler-Handler wurde ausgelöst:", error);
   if (!reply.sent) {
-    reply.status(500).send({ error: "Internal Server Error" });
+    reply.status(500).send({ error: "Internal Server Error", message: error.message });
   }
 });
 
 async function doApi(req: FastifyRequest, res: FastifyReply) {
     const u = new URL(`http://localhost${req.url}`);
     const url = `${u.pathname}${u.search}`;
-    let finalResult: any = null;
+    const method = req.method;
+    let status = 200;
 
     const nh: { [key: string]: any } = {};
     Object.entries(req.headers).forEach(([key, value]) => {
         if (!['host', 'connection'].includes(key.toLowerCase())) nh[key] = value;
     });
 
+    let finalResult: any = null;
+
     if (url.includes("/v0.4/artist/")) {
         const artistId = u.pathname.split('/').pop() || '';
-        if (artistId.startsWith('aaaaaaaa')) {
-            finalResult = await getDeemixArtistById(artistId);
-        } else {
+        
+        if (artistId.startsWith('aaaaaaaa')) { 
+            console.log(`Anfrage für Deemix-Künstler mit Fake-ID ${artistId}`);
+            const realDeemixId = getRealDeemixId(artistId);
+            finalResult = await getDeemixArtistById(realDeemixId);
+        } else { 
+            console.log(`Anfrage für MusicBrainz-Künstler mit MBID ${artistId}`);
             finalResult = await getArtistData(artistId);
         }
-    } else if (url.includes("/v0.4/search")) {
-        const queryParam = u.searchParams.get("query") || "";
-        console.log(`Starte parallele Suche für: "${queryParam}"`);
-
-        const lidarrPromise = fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 3000 })
-            .then(response => response.ok ? response.json() : [])
-            .then(data => (Array.isArray(data) ? data : []))
-            .catch(() => {
-                console.warn("Lidarr API (MusicBrainz) nicht erreichbar oder Timeout. Wird ignoriert.");
-                return [];
-            });
-
-        const deemixPromise = searchDeemixArtists(queryParam);
-
-        const [lidarrResults, deemixArtists] = await Promise.all([lidarrPromise, deemixPromise]);
-
-        console.log(`Suche beendet: ${lidarrResults.length} von MusicBrainz, ${deemixArtists.length} von Deemix.`);
-
-        const existingLidarrNames = new Set(lidarrResults.map(item => normalize(item?.artist?.artistname || '')));
-        const deemixFormattedResults = [];
-
-        for (const d of deemixArtists) {
-            if (!existingLidarrNames.has(normalize(d.name))) {
-                deemixFormattedResults.push({
-                    artist: {
-                        id: fakeId(d.id, "artist"),
-                        foreignArtistId: fakeId(d.id, "artist"),
-                        artistname: d.name,
-                        sortname: d.name,
-                        images: [{ CoverType: "Poster", Url: d.picture_xl }],
-                        disambiguation: `Deemix ID: ${d.id}`,
-                        overview: `Von Deemix importierter Künstler. ID: ${d.id}`,
-                        artistaliases: [], genres: [], status: "active", type: "Artist"
-                    },
-                });
-            }
+        
+        // === DER ENTSCHEIDENDE FIX ===
+        // Wenn wir keinen vollständigen Künstler gefunden haben (egal warum),
+        // senden wir einen 404, damit Lidarr nicht abstürzt.
+        if (finalResult === null) {
+            status = 404;
         }
-        finalResult = [...lidarrResults, ...deemixFormattedResults];
-    } else {
-         try {
-            const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 3000 });
-            if (upstreamResponse.ok) finalResult = await upstreamResponse.json();
-         } catch (e) {
-             console.warn(`Generische Anfrage an ${url} fehlgeschlagen.`);
-         }
+
+    } else { // Alle anderen Anfragen (inkl. Suche)
+        let lidarrResults: any = [];
+        try {
+            const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { method, headers: nh, timeout: 8000 });
+            if (upstreamResponse.ok) {
+                const parsed = await upstreamResponse.json();
+                lidarrResults = Array.isArray(parsed) ? parsed : [];
+            }
+        } catch (e) {
+            console.warn("Lidarr API nicht erreichbar, fahre nur mit Deemix fort.");
+        }
+
+        if (url.includes("/v0.4/search")) {
+            const queryParam = u.searchParams.get("query") || "";
+            finalResult = await search(lidarrResults, queryParam);
+        } else {
+            finalResult = lidarrResults;
+        }
+    }
+    
+    // Wenn eine Suche kein Ergebnis liefert, ist 404 trotzdem der korrekte Status.
+    if (Array.isArray(finalResult) && finalResult.length === 0) {
+        status = 404;
     }
 
-    if (finalResult === null || (Array.isArray(finalResult) && finalResult.length === 0)) {
-        res.status(404).send({});
-    } else {
-        res.status(200).send(finalResult);
-    }
+    console.log(`Finale Antwort für ${url}: Status ${status}`);
+    res.status(status).send(finalResult || {}); // Sende leeres Objekt bei 404
 }
 
-fastify.all('*', (req, res) => {
-    doApi(req, res);
+fastify.all('*', async (req: FastifyRequest, res: FastifyReply) => {
+    try {
+        await doApi(req, res);
+    } catch (err) {
+        res.send(err);
+    }
 });
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
@@ -97,5 +90,5 @@ fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
     console.error(err);
     process.exit(1);
   }
-  console.log(`✅ Lidarr++Deemix Proxy läuft jetzt stabil und schnell unter ${address}`);
+  console.log("✅ Lidarr++Deemix Proxy läuft jetzt stabil unter " + address);
 });
