@@ -4,7 +4,6 @@ import { normalize, titleCase } from "./helpers.js";
 
 const deemixUrl = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
 
-// Eine robuste Funktion, um Anfragen an Deemix zu senden
 async function safeDeemixFetch(path: string): Promise<any> {
     try {
         const res = await fetch(`${deemixUrl}${path}`);
@@ -19,39 +18,31 @@ async function safeDeemixFetch(path: string): Promise<any> {
     }
 }
 
-// Erstellt eine eindeutige Fake-MBID
 export function fakeId(id: any, type: string): string {
-  let p = "a"; // artist
+  let p = "a";
   if (type === "album") p = "b";
   if (type === "track") p = "c";
   if (type === "release") p = "d";
   if (type === "recording") p = "e";
-  
   id = `${id}`.padStart(12, p);
   return `${"".padStart(8, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${"".padStart(4, p)}-${id}`;
 }
 
-// Extrahiert die echte Deemix-ID aus unserer Fake-ID
 function getRealDeemixId(fakeId: string): string {
     const idPart = fakeId.split('-')[4];
     return idPart ? idPart.replace(/^[a-z]+/, '') : '';
 }
 
-// Sucht nach Künstlern auf Deemix
 export async function searchDeemixArtists(name: string): Promise<any[]> {
   const data = await safeDeemixFetch(`/search/artists?limit=25&q=${encodeURIComponent(name)}`);
   return data?.data || [];
 }
 
-// Holt alle Tracks für ein bestimmtes Album
 async function getDeemixTracks(albumId: string): Promise<any[]> {
     const data = await safeDeemixFetch(`/album/${albumId}/tracks`);
     return data?.data || [];
 }
 
-/**
- * Erstellt ein vollständiges, mit Lidarr kompatibles Künstler-Objekt aus Deemix-Daten.
- */
 export async function getDeemixArtistById(fakeArtistId: string): Promise<any | null> {
     const deemixId = getRealDeemixId(fakeArtistId);
     if (!deemixId) return null;
@@ -67,8 +58,9 @@ export async function getDeemixArtistById(fakeArtistId: string): Promise<any | n
       status: "active",
       type: "Artist",
     };
-
-    // **HIER WAR DER FEHLER:** Dem Parameter 'album' wurde der Typ 'any' hinzugefügt.
+    
+    // === KORREKTUR DES BUILD-FEHLERS ===
+    // Dem Parameter 'album' wurde explizit der Typ 'any' gegeben.
     const albumsData = await Promise.all(
         (artistData.albums?.data || []).map((album: any) => getAlbumStructure(album.id, artistForAlbum))
     );
@@ -83,18 +75,11 @@ export async function getDeemixArtistById(fakeArtistId: string): Promise<any | n
       artistaliases: [],
       images: [{ CoverType: "Poster", Url: artistData.picture_xl }],
       Albums: albumsData.filter(Boolean),
-      genres: [],
-      links: [],
-      status: "active",
-      type: "Artist",
-      oldids: [],
-      OldForeignArtistIds: [],
+      genres: [], links: [], status: "active", type: "Artist",
+      oldids: [], OldForeignArtistIds: [],
     };
 }
 
-/**
- * Erstellt eine vollständige, mit Lidarr kompatible Album-Struktur.
- */
 async function getAlbumStructure(albumId: string, artistForAlbum: any): Promise<any | null> {
     const albumDetails = await safeDeemixFetch(`/albums/${albumId}`);
     if (!albumDetails) return null;
@@ -119,24 +104,17 @@ async function getAlbumStructure(albumId: string, artistForAlbum: any): Promise<
             Id: fakeId(albumDetails.id, "release"),
             Title: title,
             track_count: tracks.length,
-            country: ["Worldwide"],
-            status: "Official",
-            disambiguation: "",
+            country: ["Worldwide"], status: "Official", disambiguation: "",
             label: [albumDetails.label || "Unbekanntes Label"],
             oldids: [],
             releasedate: albumDetails.release_date || new Date().toISOString().split('T')[0],
-            media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
-              Format: "Digital Media",
-              Name: "",
-              Position: t.disk_number || 1,
-            })),
+            media: _.uniqBy(tracks, "disk_number").map((t: any) => ({ Format: "Digital Media", Name: "", Position: t.disk_number || 1 })),
             tracks: tracks.map((track: any, idx: number) => ({
                 artistid: artistForAlbum.id,
                 durationms: (track.duration || 0) * 1000,
                 id: fakeId(track.id, "track"),
                 mediumnumber: track.disk_number || 1,
-                oldids: [],
-                oldrecordingids: [],
+                oldids: [], oldrecordingids: [],
                 recordingid: fakeId(track.id, "recording"),
                 trackname: track.title || "Unbekannter Track",
                 tracknumber: `${idx + 1}`,

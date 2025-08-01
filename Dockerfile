@@ -20,7 +20,6 @@ RUN npm i -g pnpm
 
 # --- Python Abhängigkeiten ---
 COPY python/requirements.txt ./python/requirements.txt
-# Korrigierter und zusammengefügter Befehl
 RUN python -m pip install --upgrade pip && \
     python -m pip install --no-cache-dir -r python/requirements.txt
 
@@ -42,25 +41,21 @@ FROM python:3.12-alpine
 
 WORKDIR /app
 
-# Installiere nur die notwendigen Laufzeit-Tools
-RUN apk add --no-cache nodejs mitmproxy bash
+# Installiere nur die notwendigen Laufzeit-Tools (inkl. dos2unix zur Sicherheit)
+RUN apk add --no-cache nodejs mitmproxy bash dos2unix
 
 # --- Kopiere Abhängigkeiten aus der Builder-Stufe ---
-# Kopiere installierte Python-Pakete
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-# Kopiere installierte Node-Module
 COPY --from=builder /app/node_modules ./node_modules
 
 # --- Kopiere Anwendungs-Code ---
-# Kopiere den kompilierten JavaScript-Code
 COPY --from=builder /app/dist ./dist
-# Kopiere die Python-Skripte
 COPY python ./python
-# Kopiere das Start-Skript
 COPY run.sh .
 
-# Mache das Start-Skript ausführbar
-RUN chmod +x ./run.sh
+# === ENTSCHEIDENDER FIX FÜR DEN STARTFEHLER ===
+# Stelle sicher, dass das Skript Unix-Zeilenenden hat und ausführbar ist
+RUN dos2unix ./run.sh && chmod +x ./run.sh
 
 # Exponiere den Port des Proxys
 EXPOSE 8080
