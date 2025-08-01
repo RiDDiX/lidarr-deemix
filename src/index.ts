@@ -1,17 +1,17 @@
 import fetch from "node-fetch";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import dotenv from "dotenv";
-import { search, getDeemixArtistById, getAlbumById } from "./deemix.js";
+import { searchDeemixArtists, getDeemixArtistById, getAlbumById, fakeId } from "./deemix.js";
 import { getArtistData } from "./artistData.js";
+import { normalize } from "./helpers.js";
 
 dotenv.config();
 
 const lidarrApiUrl = "https://api.lidarr.audio";
 const fastify = Fastify({ logger: false });
 
-// Zentraler Fehler-Handler, um unerwartete Abstürze zu verhindern
 fastify.setErrorHandler((error, request, reply) => {
-  console.error("Ein unerwarteter Fehler wurde im zentralen Handler abgefangen:", error);
+  console.error("Ein unerwarteter Fehler wurde abgefangen:", error);
   if (!reply.sent) {
     reply.status(500).send({ error: "Internal Server Error", message: error.message });
   }
@@ -27,86 +27,94 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
         if (!['host', 'connection'].includes(key.toLowerCase())) nh[key] = value;
     });
 
-    // --- FINALE LOGIK ZUR VERMEIDUNG VON TIMEOUTS ---
+    // --- FINALE LOGIK MIT PARALLELER SUCHE ---
 
-    // 1. Spezifische Anfragen (Künstler oder Album per ID)
     if (url.includes("/v0.4/artist/")) {
         const artistId = u.pathname.split('/').pop() || '';
         if (artistId.startsWith('aaaaaaaa')) {
-            console.log(`Verarbeite Deemix-Künstler-Anfrage für Fake-ID ${artistId}`);
             finalResult = await getDeemixArtistById(artistId);
         } else {
-            console.log(`Versuche, MusicBrainz-Künstler für MBID ${artistId} abzurufen...`);
             finalResult = await getArtistData(artistId);
         }
     } else if (url.includes("/v0.4/album/")) {
         const albumId = u.pathname.split('/').pop() || '';
         if (albumId.startsWith('bbbbbbbb')) {
-             console.log(`Verarbeite Deemix-Album-Anfrage für Fake-ID ${albumId}`);
              finalResult = await getAlbumById(albumId);
         } else {
-            // Album-Anfragen an MusicBrainz leiten wir durch, aber mit kurzem Timeout
             try {
-                 const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 }); // 2-Sekunden-Timeout
+                 const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 });
                  if (upstreamResponse.ok) finalResult = await upstreamResponse.json();
             } catch (e) {
-                console.warn(`Timeout oder Fehler bei der Abfrage von Album ${albumId} von Lidarr API.`);
+                console.warn(`Timeout oder Fehler bei Album-Abfrage von Lidarr API.`);
             }
         }
     }
-    // 2. Allgemeine Suchanfragen
+    // **OPTIMIERTE SUCHE**
     else if (url.includes("/v0.4/search")) {
-        let lidarrResults: any[] = [];
-        try {
-            // **ENTSCHEIDENDER FIX: Kurzer Timeout von 2 Sekunden**
-            // Wenn die Lidarr-API nicht schnell antwortet, brechen wir ab und nutzen nur Deemix.
-            const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 });
-            
-            if (upstreamResponse.ok) {
-                const parsed = await upstreamResponse.json();
-                lidarrResults = Array.isArray(parsed) ? parsed : [];
-                console.log(`${lidarrResults.length} Ergebnisse von MusicBrainz erhalten.`);
-            } else {
-                 console.warn(`Lidarr API (MusicBrainz) antwortete mit Status ${upstreamResponse.status}.`);
-            }
-        } catch (e) {
-            console.warn("Lidarr API (MusicBrainz) nicht erreichbar oder Timeout. Fahre nur mit Deemix fort.");
-            // Dieser Fehler ist erwartet, wenn die API langsam ist. lidarrResults bleibt leer.
-        }
-        
         const queryParam = u.searchParams.get("query") || "";
-        console.log(`Führe Deemix-Suche für "${queryParam}" aus...`);
-        finalResult = await search(lidarrResults, queryParam);
-    }
-    // 3. Alle anderen Anfragen durchleiten (z.B. für Systemstatus etc.)
-    else {
+        console.log(`Starte parallele Suche für: "${queryParam}"`);
+
+        // Promise für Lidarr/MusicBrainz mit kurzem Timeout
+        const lidarrPromise = fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 })
+            .then(res => res.ok ? res.json() : Promise.resolve([]))
+            .then(data => (Array.isArray(data) ? data : []))
+            .catch(e => {
+                console.warn("Lidarr API (MusicBrainz) nicht erreichbar oder Timeout. Ignoriere.");
+                return []; // Bei Fehler/Timeout leeres Array zurückgeben
+            });
+
+        // Promise für Deemix
+        const deemixPromise = searchDeemixArtists(queryParam);
+
+        // Auf beide Ergebnisse parallel warten
+        const [lidarrResults, deemixArtists] = await Promise.all([lidarrPromise, deemixPromise]);
+
+        console.log(`Parallele Suche beendet: ${lidarrResults.length} von MusicBrainz, ${deemixArtists.length} von Deemix.`);
+
+        // Ergebnisse zusammenführen, Duplikate vermeiden
+        const existingLidarrNames = new Set(lidarrResults.map(item => normalize(item?.artist?.artistname || '')));
+        const deemixFormattedResults = [];
+
+        for (const d of deemixArtists) {
+            if (existingLidarrNames.has(normalize(d.name))) {
+                continue;
+            }
+            deemixFormattedResults.push({
+                artist: {
+                    id: fakeId(d.id, "artist"),
+                    foreignArtistId: fakeId(d.id, "artist"),
+                    artistname: d.name,
+                    sortname: d.name,
+                    images: [{ CoverType: "Poster", Url: d.picture_xl }],
+                    disambiguation: `Deemix ID: ${d.id}`,
+                    overview: `Von Deemix importierter Künstler. ID: ${d.id}`,
+                    artistaliases: [], genres: [], status: "active", type: "Artist"
+                },
+            });
+        }
+        finalResult = [...lidarrResults, ...deemixFormattedResults];
+    } else {
          try {
             const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 });
             if (upstreamResponse.ok) finalResult = await upstreamResponse.json();
          } catch (e) {
-             console.warn(`Generische Anfrage an ${url} fehlgeschlagen oder Timeout.`);
+             console.warn(`Generische Anfrage an ${url} fehlgeschlagen.`);
          }
     }
 
-    // Finale Status-Prüfung
     if (finalResult === null || (Array.isArray(finalResult) && finalResult.length === 0)) {
-        console.log(`Keine Ergebnisse für ${url} gefunden. Sende 404, um die Anfrage in Lidarr abzuschließen.`);
         res.status(404).send({});
     } else {
-        console.log(`Sende erfolgreiche Antwort (200) für ${url} mit ${Array.isArray(finalResult) ? finalResult.length : '1'} Ergebnissen.`);
         res.status(200).send(finalResult);
     }
 }
 
-// Haupt-Routing
-fastify.all('*', (req, res) => {
-    doApi(req, res);
-});
+fastify.all('*', (req, res) => { doApi(req, res); });
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
   if (err) {
     console.error(err);
     process.exit(1);
   }
-  console.log(`✅ Lidarr++Deemix Proxy läuft jetzt stabil unter ${address}`);
+  console.log(`✅ Lidarr++Deemix Proxy läuft jetzt stabil und schnell unter ${address}`);
 });
