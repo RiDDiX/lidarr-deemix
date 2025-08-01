@@ -9,9 +9,9 @@ dotenv.config();
 const lidarrApiUrl = "https://api.lidarr.audio";
 const fastify = Fastify({ logger: false });
 
-// Zentraler Fehler-Handler, um Abstürze zu vermeiden
+// Zentraler Fehler-Handler, um unerwartete Abstürze zu verhindern
 fastify.setErrorHandler((error, request, reply) => {
-  console.error("Ein zentraler Fehler wurde abgefangen:", error);
+  console.error("Ein unerwarteter Fehler wurde im zentralen Handler abgefangen:", error);
   if (!reply.sent) {
     reply.status(500).send({ error: "Internal Server Error", message: error.message });
   }
@@ -20,133 +20,93 @@ fastify.setErrorHandler((error, request, reply) => {
 async function doApi(req: FastifyRequest, res: FastifyReply) {
     const u = new URL(`http://localhost${req.url}`);
     const url = `${u.pathname}${u.search}`;
-    const method = req.method;
-    let status = 200;
+    let finalResult: any = null;
 
     const nh: { [key: string]: any } = {};
     Object.entries(req.headers).forEach(([key, value]) => {
         if (!['host', 'connection'].includes(key.toLowerCase())) nh[key] = value;
     });
 
-    let finalResult: any = null;
+    // --- FINALE LOGIK ZUR VERMEIDUNG VON TIMEOUTS ---
 
-    // Abfrage für einen bestimmten Künstler
+    // 1. Spezifische Anfragen (Künstler oder Album per ID)
     if (url.includes("/v0.4/artist/")) {
         const artistId = u.pathname.split('/').pop() || '';
-        
-        // Deemix-Künstler anhand der Fake-ID erkennen
-        if (artistId.startsWith('aaaaaaaa')) { 
-            console.log(`Anfrage für Deemix-Künstler mit Fake-ID ${artistId}`);
+        if (artistId.startsWith('aaaaaaaa')) {
+            console.log(`Verarbeite Deemix-Künstler-Anfrage für Fake-ID ${artistId}`);
             finalResult = await getDeemixArtistById(artistId);
-        } else { // MusicBrainz-Künstler
-            console.log(`Anfrage für MusicBrainz-Künstler mit MBID ${artistId}`);
+        } else {
+            console.log(`Versuche, MusicBrainz-Künstler für MBID ${artistId} abzurufen...`);
             finalResult = await getArtistData(artistId);
         }
-        
-        // Wenn kein Künstler gefunden wurde (egal warum), 404 senden, um Lidarr-Absturz zu verhindern
-        if (finalResult === null) {
-            status = 404;
-        }
-
-    // Abfrage für ein bestimmtes Album
     } else if (url.includes("/v0.4/album/")) {
         const albumId = u.pathname.split('/').pop() || '';
         if (albumId.startsWith('bbbbbbbb')) {
-             console.log(`Anfrage für Deemix-Album mit Fake-ID ${albumId}`);
+             console.log(`Verarbeite Deemix-Album-Anfrage für Fake-ID ${albumId}`);
              finalResult = await getAlbumById(albumId);
-             status = finalResult === null ? 404 : 200;
         } else {
-            // Für Alben von MusicBrainz leiten wir einfach weiter
+            // Album-Anfragen an MusicBrainz leiten wir durch, aber mit kurzem Timeout
             try {
-                 const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { method, headers: nh, timeout: 8000 });
-                 status = upstreamResponse.status;
-                 if (upstreamResponse.ok) {
-                    finalResult = await upstreamResponse.json();
-                 }
+                 const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 }); // 2-Sekunden-Timeout
+                 if (upstreamResponse.ok) finalResult = await upstreamResponse.json();
             } catch (e) {
-                console.warn(`Lidarr API für Album ${albumId} nicht erreichbar.`);
-                status = 404;
+                console.warn(`Timeout oder Fehler bei der Abfrage von Album ${albumId} von Lidarr API.`);
             }
         }
-
-    } else { // Alle anderen Anfragen (inklusive Suche)
+    }
+    // 2. Allgemeine Suchanfragen
+    else if (url.includes("/v0.4/search")) {
         let lidarrResults: any[] = [];
         try {
-            // Versuche, Ergebnisse von der Lidarr-API (MusicBrainz) zu erhalten
-            const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { method, headers: nh, timeout: 8000 });
-            status = upstreamResponse.status;
+            // **ENTSCHEIDENDER FIX: Kurzer Timeout von 2 Sekunden**
+            // Wenn die Lidarr-API nicht schnell antwortet, brechen wir ab und nutzen nur Deemix.
+            const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 });
+            
             if (upstreamResponse.ok) {
                 const parsed = await upstreamResponse.json();
                 lidarrResults = Array.isArray(parsed) ? parsed : [];
+                console.log(`${lidarrResults.length} Ergebnisse von MusicBrainz erhalten.`);
+            } else {
+                 console.warn(`Lidarr API (MusicBrainz) antwortete mit Status ${upstreamResponse.status}.`);
             }
         } catch (e) {
-            console.warn("Lidarr API (MusicBrainz) ist nicht erreichbar. Fahre nur mit Deemix fort.");
-            // Setze den Status zurück, da wir einen Fallback haben
-            status = 200;
+            console.warn("Lidarr API (MusicBrainz) nicht erreichbar oder Timeout. Fahre nur mit Deemix fort.");
+            // Dieser Fehler ist erwartet, wenn die API langsam ist. lidarrResults bleibt leer.
         }
-
-        // Wenn es eine Suchanfrage ist, reichern wir die Ergebnisse mit Deemix an
-        if (url.includes("/v0.4/search")) {
-            const queryParam = u.searchParams.get("query") || "";
-            finalResult = await search(lidarrResults, queryParam);
-        } else {
-            finalResult = lidarrResults;
-        }
+        
+        const queryParam = u.searchParams.get("query") || "";
+        console.log(`Führe Deemix-Suche für "${queryParam}" aus...`);
+        finalResult = await search(lidarrResults, queryParam);
     }
-    
-    // Wenn eine Suche oder Abfrage kein Ergebnis liefert, ist 404 der korrekte Status für Lidarr
+    // 3. Alle anderen Anfragen durchleiten (z.B. für Systemstatus etc.)
+    else {
+         try {
+            const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { headers: nh, timeout: 2000 });
+            if (upstreamResponse.ok) finalResult = await upstreamResponse.json();
+         } catch (e) {
+             console.warn(`Generische Anfrage an ${url} fehlgeschlagen oder Timeout.`);
+         }
+    }
+
+    // Finale Status-Prüfung
     if (finalResult === null || (Array.isArray(finalResult) && finalResult.length === 0)) {
-        status = 404;
-        finalResult = {}; // Sende ein leeres Objekt statt null
-    }
-
-    console.log(`Finale Antwort für ${url}: Status ${status}`);
-    res.status(status).send(finalResult);
-}
-
-// Route für alle Anfragen definieren
-fastify.all('*', async (req: FastifyRequest, res: FastifyReply) => {
-    // Der Host-Header "X-Proxy-Host" wird von mitmproxy gesetzt
-    const host = req.headers["x-proxy-host"];
-
-    if (host === "ws.audioscrobbler.com") {
-        // Last.fm Anfragen werden separat behandelt
-        await proxyToScrobbler(req, res);
+        console.log(`Keine Ergebnisse für ${url} gefunden. Sende 404, um die Anfrage in Lidarr abzuschließen.`);
+        res.status(404).send({});
     } else {
-        // Alle anderen (api.lidarr.audio) werden von unserer Hauptlogik verarbeitet
-        await doApi(req, res);
+        console.log(`Sende erfolgreiche Antwort (200) für ${url} mit ${Array.isArray(finalResult) ? finalResult.length : '1'} Ergebnissen.`);
+        res.status(200).send(finalResult);
     }
-});
-
-// Proxy-Funktion für Last.fm/Scrobbler
-async function proxyToScrobbler(req: FastifyRequest, reply: FastifyReply) {
-  const u = new URL(`http://localhost${req.url}`);
-  const url = `https://ws.audioscrobbler.com${u.pathname}${u.search}`;
-
-  const headers: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (typeof value === "string" && !["host", "connection", "x-proxy-host"].includes(key)) {
-      headers[key] = value;
-    }
-  }
-
-  const fetchOpts = {
-    method: req.method,
-    headers,
-    body: req.method !== "GET" && req.method !== "HEAD" ? req.body as any : undefined,
-  };
-
-  const res = await fetch(url, fetchOpts);
-  const json = await res.json();
-  
-  reply.status(res.status).headers(res.headers.raw()).send(json);
 }
 
+// Haupt-Routing
+fastify.all('*', (req, res) => {
+    doApi(req, res);
+});
 
 fastify.listen({ port: 7171, host: "0.0.0.0" }, (err, address) => {
   if (err) {
     console.error(err);
     process.exit(1);
   }
-  console.log("✅ Lidarr++Deemix Proxy läuft jetzt stabil unter " + address);
+  console.log(`✅ Lidarr++Deemix Proxy läuft jetzt stabil unter ${address}`);
 });
