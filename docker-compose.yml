@@ -1,13 +1,64 @@
-version: "3"
+version: '3.8'
+
 services:
   lidarr-deemix:
-    image: ghcr.io/ad-on-is/lidarr-deemix
+    build: .
+    image: lidarr-deemix:latest
     container_name: lidarr-deemix
+    restart: unless-stopped
     ports:
-      - 8080:8080 # optional, only if you want to expose the port to the host
+      - "8080:8080"  # mitmproxy port
     environment:
-      - DEEMIX_ARL=xxxx
-      - OVERRIDE_MB=false # set to true to override MusicBrainz completely !!! CAUTION !!! will delete all artists/albums imported from MB
-      - PRIO_DEEMIX=false # set to true to prioritize Deemix albums over Lidarr (adds dupliactes on existing albums, needs cleanup and rescan)
-      - FALLBACK_DEEZER=true # set to true to use Deemix / Deezer as Fallback when Lidarr (MusicBrainz) cant find artists / albums
+      # WICHTIG: Deine Deezer ARL hier eintragen!
+      - DEEMIX_ARL=${DEEMIX_ARL}
       
+      # Proxy Einstellungen
+      - PROXY_PORT=7171
+      - PROXY_HOST=0.0.0.0
+      
+      # Deemix Server Einstellungen
+      - DEEMIX_URL=http://127.0.0.1:7272
+      - DEEMIX_PORT=7272
+      - DEEMIX_HOST=0.0.0.0
+      
+      # Lidarr API (normalerweise nicht ändern)
+      - LIDARR_API_URL=https://api.lidarr.audio
+      
+      # Optional: Lidarr-Instanz für erweiterte Features
+      - LIDARR_URL=${LIDARR_URL:-http://lidarr:8686}
+      - LIDARR_API_KEY=${LIDARR_API_KEY}
+      
+      # Feature Flags
+      - OVERRIDE_MB=${OVERRIDE_MB:-false}
+      - PRIO_DEEMIX=${PRIO_DEEMIX:-false}
+      - FALLBACK_DEEZER=${FALLBACK_DEEZER:-true}
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - NODE_ENV=${NODE_ENV:-production}
+      
+    volumes:
+      # Config Verzeichnis für Deemix
+      - ./config:/app/config
+      
+      # Logs persistent speichern
+      - ./logs:/app/logs
+      
+      # Downloads (falls Download-Feature genutzt wird)
+      - ./downloads:/app/downloads
+      
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7171/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+      
+    networks:
+      - lidarr-network
+
+# Netzwerk für Lidarr-Integration
+networks:
+  lidarr-network:
+    driver: bridge
+    name: lidarr-network
