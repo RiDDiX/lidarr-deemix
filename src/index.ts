@@ -1,5 +1,5 @@
 import fetch from "node-fetch";
-import Fastify, { FastifyRequest, FastifyReply } from "fastify";
+import Fastify from "fastify";
 import dotenv from "dotenv";
 import { search, getDeemixArtistById, getRealDeemixId } from "./deemix.js";
 import { getArtistData } from "./artistData.js";
@@ -9,8 +9,7 @@ dotenv.config();
 const lidarrApiUrl = process.env.LIDARR_API_URL || "https://api.lidarr.audio";
 const fastify = Fastify({ 
     logger: {
-        level: process.env.LOG_LEVEL || 'info',
-        prettyPrint: process.env.NODE_ENV !== 'production'
+        level: process.env.LOG_LEVEL || 'info'
     },
     bodyLimit: 10485760, // 10MB
     trustProxy: true
@@ -75,7 +74,7 @@ async function checkLidarrHealth(): Promise<boolean> {
     }
 }
 
-async function doApi(req: FastifyRequest, res: FastifyReply) {
+async function doApi(req: any, res: any) {
     const startTime = Date.now();
     const u = new URL(`http://localhost${req.url}`);
     const url = `${u.pathname}${u.search}`;
@@ -216,7 +215,7 @@ async function doApi(req: FastifyRequest, res: FastifyReply) {
 }
 
 // Hauptroute
-fastify.all('*', async (req: FastifyRequest, res: FastifyReply) => {
+fastify.all('*', async (req: any, res: any) => {
     try {
         await doApi(req, res);
     } catch (err: any) {

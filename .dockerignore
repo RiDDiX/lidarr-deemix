@@ -1,6 +1,66 @@
+# Git
+.git
+.gitignore
+.github
+
+# Node
 node_modules
-deploy.sh
-python/config
-certs
+npm-debug.log
+yarn-error.log
+pnpm-lock.yaml
+yarn.lock
+package-lock.json
+
+# TypeScript Build
+dist
+*.tsbuildinfo
+
+# Python
 __pycache__
-dist/*
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+
+# Logs
+logs
+*.log
+
+# Documentation
+README.md
+LICENSE
+*.md
+docs/
+
+# Config (wird zur Runtime generiert)
+config/
+downloads/
+
+# Environment
+.env
+.env.*
+
+# Tests
+test/
+tests/
+*.test.*
+*.spec.*

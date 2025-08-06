@@ -67,7 +67,7 @@ export function getRealDeemixId(fakeId: string): string {
 }
 
 // Suche nach Künstlern
-async function deemixArtists(name: string): Promise<any[]> {
+async function searchDeemixArtists(name: string): Promise<any[]> {
     const data = await safeDeemixFetch(`/search/artists?limit=100&offset=0&q=${encodeURIComponent(name)}`);
     return data?.data || [];
 }
@@ -231,7 +231,7 @@ export async function search(lidarrResults: any[], query: string): Promise<any[]
 
     console.log(`Suche nach: "${query}"`);
     
-    const deemixArtists = await deemixArtists(query);
+    const deemixArtists = await searchDeemixArtists(query);
     const existingNames = new Set(
         lidarrResults
             .filter(item => item?.artist?.artistname)
