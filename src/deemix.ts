@@ -34,7 +34,7 @@ async function safeDeemixFetch(path: string, retries = 3): Promise<any> {
     return null;
 }
 
-// Konsistente Fake-ID-Generierung für Lidarr
+// Konsistente Fake-ID-Generierung für Lidarr (MusicBrainz-Format)
 function fakeId(id: any, type: string): string {
     const prefixes: { [key: string]: string } = {
         artist: "a",
@@ -49,7 +49,7 @@ function fakeId(id: any, type: string): string {
     const prefix = prefixes[type] || "z";
     const paddedId = String(id).padStart(12, prefix);
     
-    // Konsistentes UUID-Format für Lidarr
+    // Konsistentes UUID-Format für Lidarr (MusicBrainz-kompatibel)
     return [
         "".padStart(8, prefix),
         "".padStart(4, prefix),
@@ -85,22 +85,6 @@ async function getDeemixAlbum(albumId: string): Promise<any> {
     return await safeDeemixFetch(`/albums/${albumId}`);
 }
 
-// Erstelle ein Artist-Dictionary für Lidarr
-function createArtistDict(artistId: string, artistName: string): any {
-    const dict: any = {};
-    dict[artistId] = {
-        id: artistId,
-        artistid: artistId,
-        foreignArtistId: artistId,
-        artistname: artistName,
-        sortname: artistName.split(" ").reverse().join(", "),
-        disambiguation: "",
-        status: "active",
-        type: "Artist"
-    };
-    return dict;
-}
-
 // Baut ein vollständiges Künstler-Objekt für Lidarr
 export async function getDeemixArtistById(deemixId: string): Promise<any> {
     if (!deemixId) {
@@ -120,18 +104,14 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const artistId = fakeId(artistData.id, "artist");
     const artistName = artistData.name || "Unknown Artist";
     
-    // Erstelle Artist-Dictionary für Track-Mapping
-    const artistDict = createArtistDict(artistId, artistName);
-    
-    // Basis-Künstler-Objekt
-    const baseArtist = {
+    // Basis-Künstler-Objekt für Arrays
+    const artistObject = {
         id: artistId,
-        artistid: artistId,
+        artistId: artistId,
         foreignArtistId: artistId,
-        artistname: artistName,
-        sortname: artistName.split(" ").reverse().join(", "),
-        disambiguation: `Deemix ID: ${artistData.id}`,
-        overview: `Künstler von Deezer/Deemix importiert. Original-ID: ${artistData.id}`,
+        artistName: artistName,
+        sortName: artistName.split(" ").reverse().join(", "),
+        disambiguation: "",
         status: "active",
         type: "Artist"
     };
@@ -180,7 +160,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             const tracksByDisc = _.groupBy(tracks, t => t.disk_number || 1);
             const media = Object.keys(tracksByDisc).map(discNum => ({
                 Format: "Digital Media",
-                Name: `CD${discNum}`,
+                Name: ``,
                 Position: parseInt(discNum),
                 track_count: tracksByDisc[discNum].length
             }));
@@ -192,54 +172,40 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                 const trackId = fakeId(track.id, "track");
                 const recordingId = fakeId(track.id, "recording");
                 
-                // WICHTIG: Vollständiges Track-Objekt für Lidarr
+                // Track-Objekt für Lidarr
                 return {
-                    // Pflicht-IDs
+                    // IDs
                     id: trackId,
-                    Id: trackId,
-                    trackid: trackId,
-                    recordingid: recordingId,
                     recordingId: recordingId,
                     
-                    // Künstler-Zuordnung (KRITISCH!)
-                    artistid: artistId,
+                    // Künstler (als ARRAY mit einem Objekt!)
                     artistId: artistId,
-                    artists: artistDict,  // Als Dictionary, nicht Array!
+                    artists: [artistObject],
                     artistCredit: artistName,
                     
-                    // Track-Informationen
+                    // Track-Info
                     title: track.title || track.title_short || `Track ${trackNumber}`,
-                    trackname: track.title || track.title_short || `Track ${trackNumber}`,
                     trackName: track.title || track.title_short || `Track ${trackNumber}`,
                     
                     // Position
-                    tracknumber: String(trackNumber),
                     trackNumber: String(trackNumber),
-                    trackposition: trackNumber,
                     trackPosition: trackNumber,
                     absoluteTrackNumber: globalIdx + 1,
                     
-                    // Medium/Disc
-                    mediumnumber: discNumber,
+                    // Medium
                     mediumNumber: discNumber,
-                    mediumname: `CD${discNumber}`,
-                    mediumName: `CD${discNumber}`,
+                    mediumName: ``,
                     
-                    // Duration (beide Formate)
+                    // Duration
                     duration: (track.duration || 180) * 1000,
-                    durationms: (track.duration || 180) * 1000,
                     
-                    // Zusätzliche Metadaten
+                    // Additional
                     explicit: track.explicit_lyrics || false,
                     hasFile: false,
                     trackFileId: 0,
-                    ratings: { votes: 0, value: 0 },
                     
-                    // Legacy Arrays (leer aber vorhanden)
-                    oldids: [],
-                    oldIds: [],
-                    oldrecordingids: [],
-                    oldRecordingIds: []
+                    // Legacy
+                    oldIds: []
                 };
             });
 
@@ -247,56 +213,40 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             return {
                 // IDs
                 Id: albumId,
-                id: albumId,
-                albumid: albumId,
-                albumId: albumId,
                 foreignAlbumId: albumId,
                 
                 // Titel
                 Title: title,
-                title: title,
-                LowerTitle: normalize(title),
-                lowerTitle: normalize(title),
                 cleanTitle: normalize(title),
                 
-                // Album-Typ und Status
+                // Album-Info
                 Type: albumType,
-                type: albumType,
-                ReleaseStatuses: ["Official"],
-                releaseStatuses: ["Official"],
                 SecondaryTypes: secondaryTypes,
-                secondaryTypes: secondaryTypes,
+                ReleaseStatuses: ["Official"],
                 
-                // Künstler-Zuordnung (WICHTIG!)
-                artistid: artistId,
+                // Künstler (als ARRAY!)
                 artistId: artistId,
-                artists: artistDict,  // Als Dictionary!
-                artist: baseArtist,
-                artistCredit: artistName,
+                artists: [artistObject],
                 
                 // Metadaten
                 releaseDate: albumDetails.release_date || new Date().toISOString().split('T')[0],
-                releasedate: albumDetails.release_date || new Date().toISOString().split('T')[0],
                 disambiguation: "",
                 duration: tracks.reduce((sum: number, t: any) => sum + ((t.duration || 180) * 1000), 0),
                 
                 // Bilder
                 images: albumDetails.cover_xl ? [{
                     coverType: "Cover",
-                    url: albumDetails.cover_xl
+                    url: albumDetails.cover_xl,
+                    extension: ".jpg"
                 }] : [],
                 
                 // Release mit Tracks
                 releases: [{
                     // Release IDs
                     Id: releaseId,
-                    id: releaseId,
-                    releaseid: releaseId,
-                    releaseId: releaseId,
                     
                     // Release-Info
                     Title: title,
-                    title: title,
                     disambiguation: "",
                     
                     // Status
@@ -305,31 +255,27 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                     
                     // Label
                     label: [albumDetails.label || "Unknown Label"],
-                    labelid: albumDetails.label ? [fakeId(albumDetails.label, "label")] : [],
                     
                     // Format
                     format: "Digital Media",
                     
                     // Datum
-                    releasedate: albumDetails.release_date || new Date().toISOString().split('T')[0],
                     releaseDate: albumDetails.release_date || new Date().toISOString().split('T')[0],
                     
                     // Anzahl
-                    track_count: tracks.length,
                     trackCount: tracks.length,
                     
-                    // Media-Information
+                    // Media
                     media: media,
                     
-                    // Tracks (WICHTIG: Mit vollständigen Infos!)
+                    // Tracks
                     tracks: mappedTracks,
                     
                     // Legacy
-                    oldids: [],
                     oldIds: []
                 }],
                 
-                // Zusätzliche Felder
+                // Additional
                 monitored: false,
                 anyReleaseOk: true,
                 profileId: 1,
@@ -350,41 +296,53 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const albums = (await Promise.all(albumPromises)).filter(Boolean);
     console.log(`${albums.length} Alben erfolgreich geladen`);
 
-    // Vollständiges Künstler-Objekt
+    // Vollständiges Künstler-Objekt für Lidarr
     const finalArtist = {
         // Basis-IDs
-        ...baseArtist,
+        id: artistId,
+        foreignArtistId: artistId,
+        artistName: artistName,
+        sortName: artistName.split(" ").reverse().join(", "),
+        disambiguation: `Deemix ID: ${artistData.id}`,
+        overview: `Künstler von Deezer/Deemix importiert. Original-ID: ${artistData.id}`,
+        status: "active",
+        type: "Artist",
         
         // Aliases und Links
-        artistaliases: [],
         artistAliases: [],
-        links: artistData.link ? [{ name: "Deezer", url: artistData.link }] : [],
+        links: artistData.link ? [{ 
+            name: "Deezer", 
+            url: artistData.link 
+        }] : [],
         
         // Bilder
         images: artistData.picture_xl ? [
-            { coverType: "Poster", url: artistData.picture_xl },
-            { coverType: "Fanart", url: artistData.picture_xl },
-            { coverType: "Banner", url: artistData.picture_medium || artistData.picture_xl }
+            { 
+                coverType: "Poster", 
+                url: artistData.picture_xl,
+                extension: ".jpg"
+            },
+            { 
+                coverType: "Fanart", 
+                url: artistData.picture_xl,
+                extension: ".jpg"
+            }
         ] : [],
         
-        // Alben (mit capital A!)
+        // Alben
         Albums: albums,
-        albums: albums,
         
         // Genres
         genres: [],
         tags: [],
         
-        // IDs von anderen Diensten
+        // IDs von anderen Diensten (leer)
         tadbId: 0,
         discogsId: 0,
         allMusicId: null,
         
         // Legacy IDs
-        OldForeignArtistIds: [],
         oldForeignArtistIds: [],
-        oldids: [],
-        oldIds: [],
         
         // Statistiken
         ratings: { votes: 0, value: 0 },
@@ -396,7 +354,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             percentOfTracks: 0
         },
         
-        // Monitoring-Einstellungen
+        // Monitoring
         qualityProfileId: 1,
         metadataProfileId: 1,
         monitored: false,
@@ -407,13 +365,13 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         added: new Date().toISOString(),
         lastInfoSync: new Date().toISOString(),
         
-        // Zusätzliche Felder
+        // Zusätzlich
         cleanName: normalize(artistName),
         path: null,
         folder: null
     };
     
-    console.log(`Künstler ${artistName} erstellt mit ${albums.length} Alben und ${finalArtist.statistics.trackCount} Tracks`);
+    console.log(`Künstler ${artistName} mit ${albums.length} Alben und ${finalArtist.statistics.trackCount} Tracks erstellt`);
     
     return finalArtist;
 }
@@ -429,8 +387,8 @@ export async function search(lidarrResults: any[], query: string): Promise<any[]
     const deemixArtists = await searchDeemixArtists(query);
     const existingNames = new Set(
         lidarrResults
-            .filter(item => item?.artist?.artistname)
-            .map(item => normalize(item.artist.artistname))
+            .filter(item => item?.artist?.artistName)
+            .map(item => normalize(item.artist.artistName))
     );
     
     const deemixResults = [];
@@ -447,19 +405,19 @@ export async function search(lidarrResults: any[], query: string): Promise<any[]
             artist: {
                 // IDs
                 id: artistId,
-                artistid: artistId,
-                artistId: artistId,
                 foreignArtistId: artistId,
                 
-                // Name
-                artistname: artist.name,
+                // Name (PascalCase!)
                 artistName: artist.name,
-                sortname: artist.name.split(" ").reverse().join(", "),
                 sortName: artist.name.split(" ").reverse().join(", "),
                 
                 // Bilder
                 images: artist.picture_xl ? [
-                    { coverType: "Poster", url: artist.picture_xl }
+                    { 
+                        coverType: "Poster", 
+                        url: artist.picture_xl,
+                        extension: ".jpg"
+                    }
                 ] : [],
                 
                 // Metadaten
@@ -467,7 +425,6 @@ export async function search(lidarrResults: any[], query: string): Promise<any[]
                 overview: `Von Deezer verfügbar`,
                 
                 // Aliases und Genres
-                artistaliases: [],
                 artistAliases: [],
                 genres: [],
                 tags: [],
