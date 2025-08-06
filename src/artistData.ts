@@ -17,31 +17,41 @@ export async function getArtistData(mbid: string): Promise<any> {
     const artist = await res.json();
     if (!artist) return null;
 
+    // Alben verarbeiten (Release Groups)
     const albums = (artist["release-groups"] || []).map((rg: any) => ({
       Id: createMbid(rg.id),
       Title: titleCase(rg.title),
-      ReleaseStatuses: ["Official"],
-      SecondaryTypes: (rg["secondary-types"] || []).includes("Live") ? ["Live"] : [],
       Type: rg["primary-type"] === 'ep' ? 'EP' : titleCase(rg["primary-type"] || 'album'),
+      SecondaryTypes: (rg["secondary-types"] || []).includes("Live") ? ["Live"] : [],
+      // Minimale Release-Struktur für MusicBrainz
+      releases: [{
+        Id: createMbid(rg.id),
+        Title: titleCase(rg.title),
+        status: "Official",
+        country: ["Worldwide"],
+        label: [""],
+        format: "",
+        releaseDate: rg["first-release-date"] || "",
+        media: [],
+        tracks: []
+      }]
     }));
 
+    // Künstler-Objekt (MusicBrainz-kompatibel)
     return {
-      artistname: artist.name,
-      foreignArtistId: createMbid(artist.id),
       id: createMbid(artist.id),
-      sortname: artist["sort-name"],
+      foreignArtistId: createMbid(artist.id),
+      artistName: artist.name,
+      sortName: artist["sort-name"],
       disambiguation: artist.disambiguation || "",
       overview: artist.disambiguation || "",
-      artistaliases: (artist.aliases || []).map((a: any) => a.name),
-      Albums: albums,
-      genres: [],
-      links: [],
-      images: [],
       status: "active",
-      type: "Artist",
-      // === DER FINALE FIX (AUCH HIER NÖTIG) ===
-      OldForeignArtistIds: [],
-      oldids: [],
+      type: artist.type || "Artist",
+      images: [],
+      links: [],
+      genres: [],
+      Albums: albums,
+      oldForeignArtistIds: []
     };
   } catch (error) {
     console.error(`Fehler beim Abrufen der MusicBrainz-Daten für MBID ${mbid}:`, error);
