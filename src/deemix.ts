@@ -122,6 +122,12 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             }
 
             const tracks = await getDeemixTracks(albumSummary.id);
+            
+            // Validierung der Tracks
+            if (!tracks || tracks.length === 0) {
+                console.warn(`Album ${albumSummary.id} hat keine Tracks, überspringe...`);
+                return null;
+            }
             const albumId = fakeId(albumDetails.id, "album");
             const releaseId = fakeId(albumDetails.id, "release");
             const title = titleCase(albumDetails.title || "Unknown Album");
@@ -154,17 +160,26 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                 
                 // KRITISCH: Künstler-Infos müssen auf Album-Ebene vorhanden sein
                 artistid: artistId,
+                artistId: artistId, // Beide Schreibweisen für Kompatibilität
                 artists: [baseArtist],
+                artist: baseArtist,
+                
+                // Album-Metadaten
+                releaseDate: albumDetails.release_date || new Date().toISOString().split('T')[0],
+                disambiguation: "",
+                duration: tracks.reduce((sum: number, t: any) => sum + (t.duration || 180), 0) * 1000,
                 
                 // Release-Informationen
                 releases: [{
                     Id: releaseId,
                     Title: title,
                     track_count: tracks.length,
+                    trackCount: tracks.length,
                     country: ["Worldwide"],
                     status: "Official",
                     disambiguation: "",
                     label: [albumDetails.label || "Unknown Label"],
+                    format: "Digital Media",
                     oldids: [],
                     releasedate: albumDetails.release_date || new Date().toISOString().split('T')[0],
                     
@@ -177,19 +192,44 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                     })),
                     
                     // Track-Informationen
-                    tracks: tracks.map((track: any, idx: number) => ({
-                        artistid: artistId,
-                        artists: [baseArtist],
-                        durationms: (track.duration || 180) * 1000, // Fallback auf 3 Minuten
-                        id: fakeId(track.id, "track"),
-                        mediumnumber: track.disk_number || 1,
-                        oldids: [],
-                        oldrecordingids: [],
-                        recordingid: fakeId(track.id, "recording"),
-                        trackname: track.title || `Track ${idx + 1}`,
-                        tracknumber: String(track.track_position || idx + 1),
-                        trackposition: track.track_position || idx + 1,
-                    }))
+                    tracks: tracks.map((track: any, idx: number) => {
+                        const trackNumber = track.track_position || (idx + 1);
+                        const discNumber = track.disk_number || 1;
+                        
+                        return {
+                            // IDs
+                            id: fakeId(track.id, "track"),
+                            recordingid: fakeId(track.id, "recording"),
+                            trackFileId: 0,
+                            
+                            // Künstler-Info (KRITISCH für Lidarr)
+                            artistid: artistId,
+                            artists: [baseArtist],
+                            artistCredit: artistData.name || track.artist?.name || "Unknown Artist",
+                            
+                            // Track-Details
+                            trackname: track.title || track.title_short || `Track ${trackNumber}`,
+                            title: track.title || track.title_short || `Track ${trackNumber}`,
+                            tracknumber: String(trackNumber),
+                            trackposition: trackNumber,
+                            
+                            // Medium/Disc Info
+                            mediumnumber: discNumber,
+                            mediumNumber: discNumber,
+                            
+                            // Duration
+                            durationms: (track.duration || 180) * 1000,
+                            duration: track.duration || 180,
+                            
+                            // Zusätzliche Felder für Lidarr
+                            explicit: track.explicit_lyrics || false,
+                            hasFile: false,
+                            
+                            // Legacy Support
+                            oldids: [],
+                            oldrecordingids: []
+                        };
+                    })
                 }]
             };
         } catch (error) {
@@ -201,7 +241,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const albums = (await Promise.all(albumPromises)).filter(Boolean);
 
     // Vollständiges Künstler-Objekt zurückgeben
-    return {
+    const finalArtist = {
         ...baseArtist,
         artistaliases: [],
         images: artistData.picture_xl ? [
@@ -219,8 +259,25 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             albumCount: albums.length,
             trackCount: albums.reduce((sum, album) => 
                 sum + (album.releases?.[0]?.tracks?.length || 0), 0)
-        }
+        },
+        // Zusätzliche Felder für Lidarr-Kompatibilität
+        cleanName: normalize(artistData.name),
+        tadbId: 0,
+        discogsId: 0,
+        allMusicId: null,
+        releaseGroups: albums,
+        qualityProfileId: 1,
+        metadataProfileId: 1,
+        monitored: false,
+        monitorNewItems: "all",
+        rootFolderPath: null,
+        added: new Date().toISOString()
     };
+    
+    // Debug-Ausgabe zur Überprüfung
+    console.log(`Künstler ${artistData.name} erstellt mit ${albums.length} Alben`);
+    
+    return finalArtist;
 }
 
 // Suche und kombiniere Ergebnisse
