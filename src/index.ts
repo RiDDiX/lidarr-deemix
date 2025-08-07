@@ -30,7 +30,7 @@ const proxyOptions = {
   followRedirects: true,
   timeout: 30000,
   proxyTimeout: 30000,
-  logLevel: 'info',
+  logLevel: 'info' as 'info',
   onError: (err: Error, req: any, res: any) => {
     fastify.log.error('Proxy error:', err.message);
     if (!res.headersSent) {
@@ -221,16 +221,16 @@ const proxy = createProxyMiddleware(proxyOptions);
 
 // Apply proxy to all routes
 fastify.register((fastify, opts, done) => {
-  fastify.all('*', async (request, reply) => {
-    return new Promise((resolve, reject) => {
-      proxy(request.raw, reply.raw, (err: any) => {
+  fastify.all('*', (request, reply) => {
+    return new Promise<void>((resolve, reject) => {
+      proxy(request.raw, reply.raw, (err?: Error) => {
         if (err) {
           fastify.log.error('Proxy middleware error:', err.message);
           if (!reply.sent) {
             reply.code(502).send({ error: 'Proxy error', message: err.message });
           }
         }
-        resolve(undefined);
+        resolve();
       });
     });
   });
