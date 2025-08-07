@@ -82,7 +82,7 @@ async function getDeemixAlbum(albumId: string): Promise<any> {
     return await safeDeemixFetch(`/albums/${albumId}`);
 }
 
-// HAUPTFUNKTION: Baut Künstler für Lidarr
+// HAUPTFUNKTION: Baut Künstler für Lidarr (EXAKT MusicBrainz API Format)
 export async function getDeemixArtistById(deemixId: string): Promise<any> {
     if (!deemixId) {
         console.error("Keine Deemix-ID angegeben");
@@ -149,8 +149,8 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                 Position: discNum
             }));
 
-            // WICHTIG: Tracks mit Artist-Credit für den Haupt-Künstler
-            // Dies ist der FIX für den MapTrack-Fehler!
+            // KRITISCH: Tracks OHNE artistCredit!
+            // Lidarr fügt dies selbst basierend auf dem Haupt-Künstler hinzu
             const mappedTracks = tracks.map((track: any, idx: number) => {
                 const trackNumber = track.track_position || (idx + 1);
                 const discNumber = track.disk_number || 1;
@@ -170,16 +170,9 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                     mediumNumber: discNumber,
                     
                     // Duration
-                    duration: (track.duration || 180) * 1000,
+                    duration: (track.duration || 180) * 1000
                     
-                    // KRITISCH: Artist-Credit mit dem Haupt-Künstler-ID
-                    // Dies verhindert den NullReferenceException in MapTrack!
-                    artistCredit: [
-                        {
-                            id: artistId,
-                            name: artistName
-                        }
-                    ]
+                    // KEIN artistCredit! Lidarr fügt dies selbst hinzu
                 };
             });
 
@@ -222,7 +215,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
 
     console.log(`Künstler vollständig: ${albums.length} Alben geladen`);
 
-    // FINALES KÜNSTLER-OBJEKT mit allen Artists im Dictionary
+    // FINALES KÜNSTLER-OBJEKT (MusicBrainz API v2 Format)
     const artist = {
         // Basis-IDs
         id: artistId,
@@ -255,8 +248,6 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         
         // Genres
         genres: [],
-        
-    
         
         // Alben
         Albums: albums,
@@ -337,7 +328,7 @@ export async function search(lidarrResults: any[], query: string): Promise<any[]
     
     console.log(`Suchergebnisse: ${lidarrResults.length} MusicBrainz, ${deemixResults.length} Deemix`);
     
-    // IMMER Deemix-Ergebnisse verwenden, auch wenn MusicBrainz verfügbar ist
+    // IMMER Deemix-Ergebnisse verwenden
     // Bei API-Ausfall nur Deemix
     if (lidarrResults.length === 0 && deemixResults.length > 0) {
         console.log("MusicBrainz/Lidarr API nicht verfügbar - verwende nur Deemix");
@@ -345,7 +336,6 @@ export async function search(lidarrResults: any[], query: string): Promise<any[]
     }
     
     // Kombiniere IMMER beide Quellen
-    // Deemix-Ergebnisse werden immer hinzugefügt
     if (process.env.PRIO_DEEMIX === "true") {
         return [...deemixResults, ...lidarrResults];
     }
