@@ -165,7 +165,7 @@ const proxyOptions = {
             });
             res.end(JSON.stringify({ error: 'Artist not found' }));
           }
-        } catch (error) {
+        } catch (error: any) {
           fastify.log.error('Error processing artist response:', error.message);
           res.writeHead(500, {
             'Content-Type': 'application/json',
@@ -198,7 +198,7 @@ const proxyOptions = {
             res.end(JSON.stringify(albumData));
             return;
           }
-        } catch (deemixError) {
+        } catch (deemixError: any) {
           fastify.log.error('Deemix album fetch failed:', deemixError.message);
         }
         
