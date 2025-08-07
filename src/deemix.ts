@@ -4,7 +4,7 @@ import { normalize, titleCase } from "./helpers.js";
 
 const deemixUrl = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
 
-// Stabile Fetch-Funktion
+// Stabile Fetch-Funktion mit Retry
 async function safeDeemixFetch(path: string, retries = 3): Promise<any> {
     for (let i = 0; i < retries; i++) {
         try {
@@ -56,7 +56,7 @@ function fakeId(id: any, type: string): string {
     ].join("-");
 }
 
-// Extrahiert die echte Deemix-ID
+// Extrahiert die echte Deemix-ID aus unserer Fake-ID
 export function getRealDeemixId(fakeId: string): string {
     if (!fakeId || typeof fakeId !== 'string') return '';
     const parts = fakeId.split('-');
@@ -65,31 +65,33 @@ export function getRealDeemixId(fakeId: string): string {
     return idPart ? idPart.replace(/^[a-z]+/, '') : '';
 }
 
-// Suche nach Künstlern
+// Suche nach Künstlern in Deemix
 async function searchDeemixArtists(name: string): Promise<any[]> {
     const data = await safeDeemixFetch(`/search/artists?limit=100&offset=0&q=${encodeURIComponent(name)}`);
     return data?.data || [];
 }
 
-// Hole Album-Tracks
+// Hole Album-Tracks von Deemix
 async function getDeemixTracks(albumId: string): Promise<any[]> {
     const data = await safeDeemixFetch(`/album/${albumId}/tracks`);
     return data?.data || [];
 }
 
-// Hole Album-Details
+// Hole Album-Details von Deemix
 async function getDeemixAlbum(albumId: string): Promise<any> {
     return await safeDeemixFetch(`/albums/${albumId}`);
 }
 
-// HAUPTFUNKTION: Baut Künstler für Lidarr (EXAKT MusicBrainz API Format)
+// HAUPTFUNKTION: Erstellt ein vollständiges Künstler-Objekt für Lidarr
 export async function getDeemixArtistById(deemixId: string): Promise<any> {
     if (!deemixId) {
         console.error("Keine Deemix-ID angegeben");
         return null;
     }
 
+    console.log(`========================================`);
     console.log(`Lade Künstler von Deemix: ${deemixId}`);
+    
     const artistData = await safeDeemixFetch(`/artists/${deemixId}`);
     
     if (!artistData) {
@@ -100,25 +102,28 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const artistId = fakeId(artistData.id, "artist");
     const artistName = artistData.name || "Unknown Artist";
     
-    console.log(`Verarbeite Künstler: ${artistName} (${artistId})`);
+    console.log(`Künstler: ${artistName}`);
+    console.log(`Künstler-ID: ${artistId}`);
     
-    // Verarbeite Alben
+    // Verarbeite alle Alben des Künstlers
     const albumsData = artistData.albums?.data || [];
     const albums = [];
     
+    console.log(`Verarbeite ${albumsData.length} Alben...`);
+    
     for (const albumSummary of albumsData) {
         try {
-            console.log(`  Lade Album: ${albumSummary.title}`);
+            console.log(`  → Lade Album: ${albumSummary.title}`);
             
             const albumDetails = await getDeemixAlbum(albumSummary.id);
             if (!albumDetails) {
-                console.warn(`  Album ${albumSummary.id} konnte nicht geladen werden`);
+                console.warn(`    ✗ Album ${albumSummary.id} konnte nicht geladen werden`);
                 continue;
             }
 
             const tracks = await getDeemixTracks(albumSummary.id);
             if (!tracks || tracks.length === 0) {
-                console.warn(`  Album ${albumSummary.id} hat keine Tracks`);
+                console.warn(`    ✗ Album ${albumSummary.id} hat keine Tracks`);
                 continue;
             }
             
@@ -126,14 +131,14 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             const releaseId = fakeId(albumDetails.id, "release");
             const title = albumDetails.title || "Unknown Album";
             
-            // Album-Typ
+            // Bestimme Album-Typ
             let albumType = "Album";
             const recordType = (albumDetails.record_type || "").toLowerCase();
             if (recordType === 'ep') albumType = "EP";
             else if (recordType === 'single') albumType = "Single";
             else if (recordType === 'compilation') albumType = "Compilation";
             
-            // Secondary Types
+            // Bestimme Secondary Types
             const secondaryTypes = [];
             const lowerTitle = title.toLowerCase();
             if (lowerTitle.includes("live")) secondaryTypes.push("Live");
@@ -141,7 +146,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             if (lowerTitle.includes("acoustic")) secondaryTypes.push("Acoustic");
             if (lowerTitle.includes("deluxe")) secondaryTypes.push("Deluxe");
             
-            // Media
+            // Erstelle Media-Objekte für jede Disc
             const discNumbers = _.uniq(tracks.map(t => t.disk_number || 1)).sort();
             const media = discNumbers.map(discNum => ({
                 Format: "Digital Media",
@@ -149,87 +154,73 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                 Position: discNum
             }));
 
-            // KRITISCH: Tracks OHNE artistCredit!
-            // Lidarr fügt dies selbst basierend auf dem Haupt-Künstler hinzu
+            // KRITISCH: Track-Struktur MUSS EXAKT so sein!
             const mappedTracks = tracks.map((track: any, idx: number) => {
                 const trackNumber = track.track_position || (idx + 1);
                 const discNumber = track.disk_number || 1;
                 
                 return {
-                    // Track-IDs
+                    // Pflicht-Felder für Tracks
                     id: fakeId(track.id, "track"),
                     recordingId: fakeId(track.id, "recording"),
-                    
-                    // Track-Info
                     title: track.title || `Track ${trackNumber}`,
-                    
-                    // Position
                     trackPosition: trackNumber,
-                    
-                    // Medium
                     mediumNumber: discNumber,
+                    duration: (track.duration || 180) * 1000,
                     
-                    // Duration
-                    duration: (track.duration || 180) * 1000
-                    
-                    // KEIN artistCredit! Lidarr fügt dies selbst hinzu
+                    // KRITISCH: artistCredit MUSS ein LEERES Array sein!
+                    // Nicht null, nicht undefined, nicht gefüllt - LEER!
+                    artistCredit: []
                 };
             });
 
-            // Album für Lidarr
+            // Erstelle Album-Objekt
             albums.push({
-                // Album-IDs
+                // Album Basis-Info
                 Id: albumId,
-                
-                // Album-Info
                 Title: title,
                 Type: albumType,
                 SecondaryTypes: secondaryTypes,
                 ReleaseStatuses: ["Official"],
                 
-                // Releases
+                // Releases mit Tracks
                 releases: [{
-                    // Release-IDs
                     Id: releaseId,
-                    
-                    // Release-Info
                     Title: title,
                     status: "Official",
                     country: ["Worldwide"],
                     label: [albumDetails.label || ""],
                     format: "Digital Media",
                     releaseDate: albumDetails.release_date || "",
-                    
-                    // Media und Tracks
                     media: media,
                     tracks: mappedTracks
                 }]
             });
             
-            console.log(`  ✓ Album geladen: ${title} (${tracks.length} Tracks)`);
+            console.log(`    ✓ Album geladen: ${title} (${albumType}, ${tracks.length} Tracks)`);
             
         } catch (error) {
-            console.error(`  Fehler bei Album ${albumSummary.id}:`, error);
+            console.error(`    ✗ Fehler bei Album ${albumSummary.id}:`, error);
         }
     }
 
-    console.log(`Künstler vollständig: ${albums.length} Alben geladen`);
+    console.log(`----------------------------------------`);
+    console.log(`✓ ${albums.length} Alben erfolgreich verarbeitet`);
+    console.log(`========================================`);
 
-    // FINALES KÜNSTLER-OBJEKT (MusicBrainz API v2 Format)
-    const artist = {
-        // Basis-IDs
+    // Erstelle das finale Künstler-Objekt für Lidarr
+    const finalArtist = {
+        // Künstler-IDs
         id: artistId,
         foreignArtistId: artistId,
         
-        // Namen
+        // Künstler-Namen
         artistName: artistName,
         sortName: artistName.split(" ").reverse().join(", "),
         
-        // Disambiguation
+        // Metadaten
         disambiguation: "",
-        
-        // Overview
-        overview: `Künstler von Deezer importiert (ID: ${artistData.id})`,
+        overview: `Künstler von Deezer/Deemix importiert (Original-ID: ${artistData.id})`,
         
         // Status
         status: "active",
@@ -243,36 +234,42 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             }
         ] : [],
         
-        // Links
+        // Links (leer aber vorhanden)
         links: [],
         
-        // Genres
+        // Genres (leer aber vorhanden)
         genres: [],
         
-        // Alben
+        // Die Alben
         Albums: albums,
         
-        // Legacy
+        // Legacy (leer aber vorhanden)
         oldForeignArtistIds: []
     };
     
-    return artist;
+    return finalArtist;
 }
 
-// SUCHFUNKTION
+// SUCHFUNKTION: Kombiniert MusicBrainz und Deemix Ergebnisse
 export async function search(lidarrResults: any[], query: string): Promise<any[]> {
     if (!query || query.trim().length === 0) {
-        return lidarrResults;
+        return lidarrResults || [];
     }
 
     console.log(`Suche nach: "${query}"`);
     
     // Hole Deemix-Ergebnisse
-    const deemixArtists = await searchDeemixArtists(query);
+    let deemixArtists = [];
+    try {
+        deemixArtists = await searchDeemixArtists(query);
+        console.log(`  → ${deemixArtists.length} Künstler von Deemix gefunden`);
+    } catch (e) {
+        console.error('Fehler bei Deemix-Suche:', e);
+    }
     
-    // Filtere bereits vorhandene
+    // Erstelle Set mit bereits vorhandenen Künstlern (case-insensitive)
     const existingNames = new Set(
-        lidarrResults
+        (lidarrResults || [])
             .filter(item => item?.artist?.artistName)
             .map(item => normalize(item.artist.artistName))
     );
@@ -281,62 +278,48 @@ export async function search(lidarrResults: any[], query: string): Promise<any[]
     const deemixResults = [];
     
     for (const artist of deemixArtists) {
-        // Skip wenn bereits vorhanden
+        // Skip wenn Künstler bereits in MusicBrainz-Ergebnissen
         if (existingNames.has(normalize(artist.name))) {
             continue;
         }
         
         const artistId = fakeId(artist.id, "artist");
         
-        // Suchergebnis-Format
+        // Suchergebnis-Objekt für UI
         deemixResults.push({
             artist: {
-                // IDs
                 id: artistId,
                 foreignArtistId: artistId,
-                
-                // Namen
                 artistName: artist.name,
                 sortName: artist.name.split(" ").reverse().join(", "),
-                
-                // Disambiguation
                 disambiguation: "",
-                
-                // Overview
-                overview: `Von Deezer verfügbar`,
-                
-                // Status
+                overview: `Von Deezer verfügbar (${artist.nb_fan || 0} Fans)`,
                 status: "active",
                 type: "Artist",
-                
-                // Bilder
                 images: artist.picture_xl ? [
                     {
                         coverType: "Poster",
                         url: artist.picture_xl
                     }
                 ] : [],
-                
-                // Links
                 links: [],
-                
-                // Genres
                 genres: []
             }
         });
     }
     
-    console.log(`Suchergebnisse: ${lidarrResults.length} MusicBrainz, ${deemixResults.length} Deemix`);
+    console.log(`  → ${lidarrResults?.length || 0} MusicBrainz + ${deemixResults.length} neue Deemix = ${(lidarrResults?.length || 0) + deemixResults.length} gesamt`);
     
-    // IMMER Deemix-Ergebnisse verwenden
-    // Bei API-Ausfall nur Deemix
-    if (lidarrResults.length === 0 && deemixResults.length > 0) {
-        console.log("MusicBrainz/Lidarr API nicht verfügbar - verwende nur Deemix");
+    // IMMER Deemix-Ergebnisse anzeigen!
+    // Bei MusicBrainz-Ausfall nur Deemix
+    if (!lidarrResults || lidarrResults.length === 0) {
+        console.log("MusicBrainz nicht verfügbar - verwende nur Deemix");
         return deemixResults;
     }
     
-    // Kombiniere IMMER beide Quellen
+    // Kombiniere beide Quellen
     if (process.env.PRIO_DEEMIX === "true") {
+        // Deemix zuerst
         return [...deemixResults, ...lidarrResults];
     }
     
