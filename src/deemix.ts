@@ -82,7 +82,7 @@ async function getDeemixAlbum(albumId: string): Promise<any> {
     return await safeDeemixFetch(`/albums/${albumId}`);
 }
 
-// HAUPTFUNKTION: Baut Künstler für Lidarr (EXAKT wie MusicBrainz API)
+// HAUPTFUNKTION: Baut Künstler für Lidarr
 export async function getDeemixArtistById(deemixId: string): Promise<any> {
     if (!deemixId) {
         console.error("Keine Deemix-ID angegeben");
@@ -100,7 +100,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
     const artistId = fakeId(artistData.id, "artist");
     const artistName = artistData.name || "Unknown Artist";
     
-    console.log(`Verarbeite Künstler: ${artistName}`);
+    console.log(`Verarbeite Künstler: ${artistName} (${artistId})`);
     
     // Verarbeite Alben
     const albumsData = artistData.albums?.data || [];
@@ -139,6 +139,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
             if (lowerTitle.includes("live")) secondaryTypes.push("Live");
             if (lowerTitle.includes("remix")) secondaryTypes.push("Remix");
             if (lowerTitle.includes("acoustic")) secondaryTypes.push("Acoustic");
+            if (lowerTitle.includes("deluxe")) secondaryTypes.push("Deluxe");
             
             // Media
             const discNumbers = _.uniq(tracks.map(t => t.disk_number || 1)).sort();
@@ -148,7 +149,8 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                 Position: discNum
             }));
 
-            // Tracks (OHNE artist-Referenzen - diese werden von Lidarr selbst aufgelöst!)
+            // WICHTIG: Tracks mit Artist-Credit für den Haupt-Künstler
+            // Dies ist der FIX für den MapTrack-Fehler!
             const mappedTracks = tracks.map((track: any, idx: number) => {
                 const trackNumber = track.track_position || (idx + 1);
                 const discNumber = track.disk_number || 1;
@@ -158,7 +160,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                     id: fakeId(track.id, "track"),
                     recordingId: fakeId(track.id, "recording"),
                     
-                    // Track-Info (OHNE artistId - wird von Lidarr aufgelöst!)
+                    // Track-Info
                     title: track.title || `Track ${trackNumber}`,
                     
                     // Position
@@ -168,11 +170,20 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
                     mediumNumber: discNumber,
                     
                     // Duration
-                    duration: (track.duration || 180) * 1000
+                    duration: (track.duration || 180) * 1000,
+                    
+                    // KRITISCH: Artist-Credit mit dem Haupt-Künstler-ID
+                    // Dies verhindert den NullReferenceException in MapTrack!
+                    artistCredit: [
+                        {
+                            id: artistId,
+                            name: artistName
+                        }
+                    ]
                 };
             });
 
-            // Album für Lidarr (MusicBrainz-Format)
+            // Album für Lidarr
             albums.push({
                 // Album-IDs
                 Id: albumId,
@@ -211,9 +222,9 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
 
     console.log(`Künstler vollständig: ${albums.length} Alben geladen`);
 
-    // FINALES KÜNSTLER-OBJEKT (MusicBrainz API v2 Format)
+    // FINALES KÜNSTLER-OBJEKT mit allen Artists im Dictionary
     const artist = {
-        // Basis-IDs (MusicBrainz-kompatibel)
+        // Basis-IDs
         id: artistId,
         foreignArtistId: artistId,
         
@@ -244,6 +255,20 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         
         // Genres
         genres: [],
+        
+        // WICHTIG: Artists-Dictionary für Lidarr's MapTrack
+        // Dies ist der zweite Teil des Fixes!
+        artists: {
+            [artistId]: {
+                id: artistId,
+                foreignArtistId: artistId,
+                artistName: artistName,
+                sortName: artistName.split(" ").reverse().join(", "),
+                disambiguation: "",
+                status: "active",
+                type: "Artist"
+            }
+        },
         
         // Alben
         Albums: albums,
@@ -324,7 +349,13 @@ export async function search(lidarrResults: any[], query: string): Promise<any[]
     
     console.log(`Suchergebnisse: ${lidarrResults.length} MusicBrainz, ${deemixResults.length} Deemix`);
     
-    // Priorisierung
+    // Bei API-Ausfall nur Deemix verwenden
+    if (lidarrResults.length === 0 && deemixResults.length > 0) {
+        console.log("MusicBrainz/Lidarr API nicht verfügbar - verwende nur Deemix");
+        return deemixResults;
+    }
+    
+    // Priorisierung basierend auf Umgebungsvariable
     if (process.env.PRIO_DEEMIX === "true") {
         return [...deemixResults, ...lidarrResults];
     }
