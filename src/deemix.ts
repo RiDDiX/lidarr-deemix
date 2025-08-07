@@ -1,328 +1,530 @@
-import fetch from "node-fetch";
 import _ from "lodash";
-import { normalize, titleCase } from "./helpers.js";
+const deemixUrl = "http://127.0.0.1:7272";
+import { getAllLidarrArtists } from "./lidarr.js";
+import { titleCase, normalize } from "./helpers.js";
+import { link } from "fs";
 
-const deemixUrl = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
+function fakeId(id: any, type: string) {
+  // artist
+  let p = "a";
 
-// Stabile Fetch-Funktion mit Retry
-async function safeDeemixFetch(path: string, retries = 3): Promise<any> {
-    for (let i = 0; i < retries; i++) {
-        try {
-            const res = await fetch(`${deemixUrl}${path}`, {
-                timeout: 10000,
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (!res.ok) {
-                console.warn(`Deemix-Server Status ${res.status} für: ${path}`);
-                if (res.status === 404) return null;
-                if (i === retries - 1) return null;
-                await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-                continue;
-            }
-            
-            return await res.json();
-        } catch (e) {
-            console.error(`Versuch ${i + 1}/${retries} fehlgeschlagen:`, e);
-            if (i === retries - 1) return null;
-            await new Promise(r => setTimeout(r, 1000 * (i + 1)));
-        }
+  if (type === "album") {
+    p = "b";
+  }
+  if (type === "track") {
+    p = "c";
+  }
+  if (type === "release") {
+    p = "d";
+  }
+  if (type === "recording") {
+    p = "e";
+  }
+  id = `${id}`;
+  id = id.padStart(12, p);
+
+  return `${"".padStart(8, p)}-${"".padStart(4, p)}-${"".padStart(
+    4,
+    p
+  )}-${"".padStart(4, p)}-${id}`;
+}
+
+async function searchDeemixArtists(name: string): Promise<[]> {
+  try {
+    const data = await fetch(
+      `${deemixUrl}/search/artists?limit=100&offset=0&q=${name}`
+    );
+    if (!data.ok) {
+      console.error(`Deemix artist search failed: ${data.status}`);
+      return [];
     }
+    const j = (await data.json()) as any;
+    return j["data"] as [];
+  } catch (error) {
+    console.error("Error searching Deemix artists:", error);
+    return [];
+  }
+}
+
+export async function deemixAlbum(id: string): Promise<any> {
+  try {
+    const data = await fetch(`${deemixUrl}/albums/${id}`);
+    if (!data.ok) {
+      console.error(`Deemix album fetch failed: ${data.status}`);
+      return null;
+    }
+    const j = (await data.json()) as any;
+    return j;
+  } catch (error) {
+    console.error("Error fetching Deemix album:", error);
     return null;
+  }
 }
 
-// Generiere MusicBrainz-kompatible UUID
-function fakeId(id: any, type: string): string {
-    const prefixes: { [key: string]: string } = {
-        artist: "a",
-        album: "b", 
-        track: "c",
-        release: "d",
-        recording: "e"
+export async function deemixTracks(id: string): Promise<any> {
+  try {
+    const data = await fetch(`${deemixUrl}/album/${id}/tracks`);
+    if (!data.ok) {
+      console.error(`Deemix tracks fetch failed: ${data.status}`);
+      return { data: [] };
+    }
+    const j = (await data.json()) as any;
+    return j.data as [];
+  } catch (error) {
+    console.error("Error fetching Deemix tracks:", error);
+    return [];
+  }
+}
+
+export async function deemixArtist(id: string): Promise<any> {
+  try {
+    const data = await fetch(`${deemixUrl}/artists/${id}`);
+    if (!data.ok) {
+      console.error(`Deemix artist fetch failed: ${data.status}`);
+      return null;
+    }
+    const j = (await data.json()) as any;
+
+    return {
+      Albums: [
+        ...j["albums"]["data"].map((a: any) => ({
+          Id: fakeId(a["id"], "album"),
+          OldIds: [],
+          ReleaseStatuses: ["Official"],
+          SecondaryTypes: a["title"].toLowerCase().includes("live")
+            ? ["Live"]
+            : [],
+          Title: a["title"],
+          Type: getType(a["record_type"]),
+        })),
+      ],
+      artistaliases: [],
+      artistname: j["name"],
+      disambiguation: "",
+      genres: [],
+      id: `${fakeId(j["id"], "artist")}`,
+      images: [{ CoverType: "Poster", Url: j["picture_xl"] }],
+      links: [
+        {
+          target: j["link"],
+          type: "deezer",
+        },
+      ],
+      oldids: [],
+      overview: "!!--Imported from Deemix--!!",
+      rating: { Count: 0, Value: null },
+      sortname: (j["name"] as string).split(" ").reverse().join(", "),
+      status: "active",
+      type: "Artist",
     };
-    
-    const prefix = prefixes[type] || "f";
-    const paddedId = String(id).padStart(12, prefix);
-    
-    return [
-        "".padStart(8, prefix),
-        "".padStart(4, prefix),
-        "".padStart(4, prefix),
-        "".padStart(4, prefix),
-        paddedId
-    ].join("-");
+  } catch (error) {
+    console.error("Error fetching Deemix artist:", error);
+    return null;
+  }
 }
 
-// Extrahiert die echte Deemix-ID aus unserer Fake-ID
-export function getRealDeemixId(fakeId: string): string {
-    if (!fakeId || typeof fakeId !== 'string') return '';
-    const parts = fakeId.split('-');
-    if (parts.length !== 5) return '';
-    const idPart = parts[4];
-    return idPart ? idPart.replace(/^[a-z]+/, '') : '';
-}
+async function deemixAlbums(name: string): Promise<any[]> {
+  try {
+    let total = 0;
+    let start = 0;
+    const data = await fetch(
+      `${deemixUrl}/search/albums?limit=1&offset=0&q=${name}`
+    );
 
-// Suche nach Künstlern in Deemix
-async function searchDeemixArtists(name: string): Promise<any[]> {
-    const data = await safeDeemixFetch(`/search/artists?limit=100&offset=0&q=${encodeURIComponent(name)}`);
-    return data?.data || [];
-}
-
-// Hole Album-Tracks von Deemix
-async function getDeemixTracks(albumId: string): Promise<any[]> {
-    const data = await safeDeemixFetch(`/album/${albumId}/tracks`);
-    return data?.data || [];
-}
-
-// Hole Album-Details von Deemix
-async function getDeemixAlbum(albumId: string): Promise<any> {
-    return await safeDeemixFetch(`/albums/${albumId}`);
-}
-
-// HAUPTFUNKTION: Erstellt ein vollständiges Künstler-Objekt für Lidarr
-export async function getDeemixArtistById(deemixId: string): Promise<any> {
-    if (!deemixId) {
-        console.error("Keine Deemix-ID angegeben");
-        return null;
+    if (!data.ok) {
+      console.error(`Deemix albums search failed: ${data.status}`);
+      return [];
     }
 
-    console.log(`========================================`);
-    console.log(`Lade Künstler von Deemix: ${deemixId}`);
-    
-    const artistData = await safeDeemixFetch(`/artists/${deemixId}`);
-    
-    if (!artistData) {
-        console.error(`Künstler ${deemixId} nicht gefunden`);
-        return null;
+    const j = (await data.json()) as any;
+    total = j["total"] as number;
+
+    const albums: any[] = [];
+    while (start < total) {
+      const data = await fetch(
+        `${deemixUrl}/search/albums?limit=100&offset=${start}&q=${name}`
+      );
+      if (!data.ok) {
+        console.error(`Deemix albums batch fetch failed: ${data.status}`);
+        break;
+      }
+      const j = (await data.json()) as any;
+      albums.push(...(j["data"] as []));
+      start += 100;
     }
 
-    const artistId = fakeId(artistData.id, "artist");
-    const artistName = artistData.name || "Unknown Artist";
-    
-    console.log(`Künstler: ${artistName}`);
-    console.log(`Künstler-ID: ${artistId}`);
-    
-    // Verarbeite alle Alben des Künstlers
-    const albumsData = artistData.albums?.data || [];
-    const albums = [];
-    
-    console.log(`Verarbeite ${albumsData.length} Alben...`);
-    
-    for (const albumSummary of albumsData) {
-        try {
-            console.log(`  → Lade Album: ${albumSummary.title}`);
-            
-            const albumDetails = await getDeemixAlbum(albumSummary.id);
-            if (!albumDetails) {
-                console.warn(`    ✗ Album ${albumSummary.id} konnte nicht geladen werden`);
-                continue;
-            }
+    return albums.filter(
+      (a) =>
+        normalize(a["artist"]["name"]) === normalize(name) ||
+        a["artist"]["name"] === "Verschillende artiesten"
+    );
+  } catch (error) {
+    console.error("Error fetching Deemix albums:", error);
+    return [];
+  }
+}
 
-            const tracks = await getDeemixTracks(albumSummary.id);
-            if (!tracks || tracks.length === 0) {
-                console.warn(`    ✗ Album ${albumSummary.id} hat keine Tracks`);
-                continue;
-            }
-            
-            const albumId = fakeId(albumDetails.id, "album");
-            const releaseId = fakeId(albumDetails.id, "release");
-            const title = albumDetails.title || "Unknown Album";
-            
-            // Bestimme Album-Typ
-            let albumType = "Album";
-            const recordType = (albumDetails.record_type || "").toLowerCase();
-            if (recordType === 'ep') albumType = "EP";
-            else if (recordType === 'single') albumType = "Single";
-            else if (recordType === 'compilation') albumType = "Compilation";
-            
-            // Bestimme Secondary Types
-            const secondaryTypes = [];
-            const lowerTitle = title.toLowerCase();
-            if (lowerTitle.includes("live")) secondaryTypes.push("Live");
-            if (lowerTitle.includes("remix")) secondaryTypes.push("Remix");
-            if (lowerTitle.includes("acoustic")) secondaryTypes.push("Acoustic");
-            if (lowerTitle.includes("deluxe")) secondaryTypes.push("Deluxe");
-            
-            // Erstelle Media-Objekte für jede Disc
-            const discNumbers = _.uniq(tracks.map(t => t.disk_number || 1)).sort();
-            const media = discNumbers.map(discNum => ({
-                Format: "Digital Media",
-                Name: "",
-                Position: discNum
-            }));
+function getType(rc: string) {
+  let type = rc.charAt(0).toUpperCase() + rc.slice(1);
 
-            // KRITISCH: Track-Struktur MUSS EXAKT so sein!
-            const mappedTracks = tracks.map((track: any, idx: number) => {
-                const trackNumber = track.track_position || (idx + 1);
-                const discNumber = track.disk_number || 1;
-                
-                return {
-                    // Pflicht-Felder für Tracks
-                    id: fakeId(track.id, "track"),
-                    recordingId: fakeId(track.id, "recording"),
-                    title: track.title || `Track ${trackNumber}`,
-                    trackPosition: trackNumber,
-                    mediumNumber: discNumber,
-                    duration: (track.duration || 180) * 1000,
-                    
-                    // KRITISCH: artistCredit MUSS ein LEERES Array sein!
-                    // Nicht null, nicht undefined, nicht gefüllt - LEER!
-                    artistCredit: []
-                };
-            });
+  if (type === "Ep") {
+    type = "EP";
+  }
+  return type;
+}
 
-            // Erstelle Album-Objekt
-            albums.push({
-                // Album Basis-Info
-                Id: albumId,
-                Title: title,
-                Type: albumType,
-                SecondaryTypes: secondaryTypes,
-                ReleaseStatuses: ["Official"],
-                
-                // Releases mit Tracks
-                releases: [{
-                    Id: releaseId,
-                    Title: title,
-                    status: "Official",
-                    country: ["Worldwide"],
-                    label: [albumDetails.label || ""],
-                    format: "Digital Media",
-                    releaseDate: albumDetails.release_date || "",
-                    media: media,
-                    tracks: mappedTracks
-                }]
-            });
-            
-            console.log(`    ✓ Album geladen: ${title} (${albumType}, ${tracks.length} Tracks)`);
-            
-        } catch (error) {
-            console.error(`    ✗ Fehler bei Album ${albumSummary.id}:`, error);
+export async function getAlbum(id: string) {
+  try {
+    const d = await deemixAlbum(id);
+    if (!d) {
+      console.error("Failed to fetch album data from Deemix");
+      return null;
+    }
+
+    const contributors = d["contributors"]?.map((c: any) => ({
+      id: fakeId(c["id"], "artist"),
+      artistaliases: [],
+      artistname: c["name"],
+      disambiguation: "",
+      overview: "!!--Imported from Deemix--!!",
+      genres: [],
+      images: [],
+      links: [],
+      oldids: [],
+      sortname: (c["name"] as string).split(" ").reverse().join(", "),
+      status: "active",
+      type: "Artist",
+    })) || [];
+
+    const lidarrArtists = await getAllLidarrArtists();
+
+    let lidarr = null;
+    let deemix = null;
+
+    for (let la of lidarrArtists) {
+      for (let c of contributors) {
+        if (
+          la["artistName"] === c["artistname"] ||
+          normalize(la["artistName"]) === normalize(c["artistname"])
+        ) {
+          lidarr = la;
+          deemix = c;
         }
+      }
     }
 
-    console.log(`----------------------------------------`);
-    console.log(`✓ ${albums.length} Alben erfolgreich verarbeitet`);
-    console.log(`========================================`);
+    let lidarr2: any = {};
 
-    // Erstelle das finale Künstler-Objekt für Lidarr
-    const finalArtist = {
-        // Künstler-IDs
-        id: artistId,
-        foreignArtistId: artistId,
-        
-        // Künstler-Namen
-        artistName: artistName,
-        sortName: artistName.split(" ").reverse().join(", "),
-        
-        // Metadaten
+    if (process.env.OVERRIDE_MB === "true") {
+      lidarr = deemix;
+      lidarr2 = {
+        id: lidarr["id"],
+        artistname: lidarr["artistname"],
+        artistaliases: [],
         disambiguation: "",
-        overview: `Künstler von Deezer/Deemix importiert (Original-ID: ${artistData.id})`,
-        
-        // Status
+        overview: "",
+        genres: [],
+        images: [],
+        links: [],
+        oldids: [],
+        sortname: lidarr["artistname"].split(" ").reverse().join(", "),
         status: "active",
         type: "Artist",
-        
-        // Bilder
-        images: artistData.picture_xl ? [
-            {
-                coverType: "Poster",
-                url: artistData.picture_xl
-            }
-        ] : [],
-        
-        // Links (leer aber vorhanden)
-        links: [],
-        
-        // Genres (leer aber vorhanden)
+      };
+    } else {
+      lidarr2 = {
+        id: lidarr!["foreignArtistId"],
+        artistname: lidarr!["artistName"],
+        artistaliases: [],
+        disambiguation: "",
+        overview: "",
         genres: [],
-        
-        // Die Alben
-        Albums: albums,
-        
-        // Legacy (leer aber vorhanden)
-        oldForeignArtistIds: []
+        images: [],
+        links: [],
+        oldids: [],
+        sortname: lidarr!["artistName"].split(" ").reverse().join(", "),
+        status: "active",
+        type: "Artist",
+      };
+    }
+
+    const tracks = await deemixTracks(d["id"]);
+    return {
+      aliases: [],
+      artistid: lidarr2["id"],
+      artists: [lidarr2],
+      disambiguation: "",
+      genres: [],
+      id: `${fakeId(d["id"], "album")}`,
+      images: [{ CoverType: "Cover", Url: d["cover_xl"] }],
+      links: [],
+      oldids: [],
+      overview: "!!--Imported from Deemix--!!",
+      rating: { Count: 0, Value: null },
+      releasedate: d["release_date"],
+      releases: [
+        {
+          country: ["Worldwide"],
+          disambiguation: "",
+          id: `${fakeId(d["id"], "release")}`,
+          label: [d["label"]],
+          media: _.uniqBy(tracks, "disk_number").map((t: any) => ({
+            Format: "CD",
+            Name: "",
+            Position: t["disk_number"],
+          })),
+          oldids: [],
+          releasedate: d["release_date"],
+          status: "Official",
+          title: titleCase(d["title"]),
+          track_count: d["nb_tracks"],
+          tracks: tracks.map((t: any, idx: number) => ({
+            // KRITISCH: PascalCase für Lidarr!
+            Id: `${fakeId(t["id"], "track")}`,
+            ArtistCredit: [], // MUSS PascalCase sein!
+            Title: t["title"],
+            TrackPosition: t["track_number"] || idx + 1,
+            MediumNumber: t["disk_number"] || 1,
+            Duration: t["duration"] * 1000,
+            RecordingId: fakeId(t["id"], "recording"),
+            // Legacy-Felder für Kompatibilität
+            artistid: lidarr2["id"],
+            durationms: t["duration"] * 1000,
+            id: `${fakeId(t["id"], "track")}`,
+            mediumnumber: t["disk_number"] || 1,
+            oldids: [],
+            oldrecordingids: [],
+            recordingid: fakeId(t["id"], "recording"),
+            trackname: t["title"],
+            tracknumber: `${t["track_number"] || idx + 1}`,
+            trackposition: t["track_number"] || idx + 1,
+          })),
+        },
+      ],
+      secondarytypes: d["title"].toLowerCase().includes("live") ? ["Live"] : [],
+      title: titleCase(d["title"]),
+      type: getType(d["record_type"]),
     };
-    
-    return finalArtist;
+  } catch (error) {
+    console.error("Error getting album:", error);
+    return null;
+  }
 }
 
-// SUCHFUNKTION: Kombiniert MusicBrainz und Deemix Ergebnisse
-export async function search(lidarrResults: any[], query: string): Promise<any[]> {
-    if (!query || query.trim().length === 0) {
-        return lidarrResults || [];
+export async function getAlbums(name: string) {
+  try {
+    const dalbums = await deemixAlbums(name);
+
+    let dtoRalbums = dalbums.map((d) => ({
+      Id: `${fakeId(d["id"], "album")}`,
+      OldIds: [],
+      ReleaseStatuses: ["Official"],
+      SecondaryTypes: d["title"].toLowerCase().includes("live") ? ["Live"] : [],
+      Title: titleCase(d["title"]),
+      LowerTitle: d["title"].toLowerCase(),
+      Type: getType(d["record_type"]),
+    }));
+
+    dtoRalbums = _.uniqBy(dtoRalbums, "LowerTitle");
+
+    return dtoRalbums;
+  } catch (error) {
+    console.error("Error getting albums:", error);
+    return [];
+  }
+}
+
+export async function search(
+  lidarr: any,
+  query: string,
+  isManual: boolean = true
+) {
+  try {
+    const dartists = await searchDeemixArtists(query);
+
+    let lartist;
+    let lidx = -1;
+    let didx = -1;
+    if (process.env.OVERRIDE_MB !== "true") {
+      for (const [i, artist] of lidarr.entries()) {
+        if (artist["album"] === null) {
+          lartist = artist;
+          lidx = i;
+          break;
+        }
+      }
+    }
+    if (lartist) {
+      let dartist;
+      for (const [i, d] of dartists.entries()) {
+        if (
+          lartist["artist"]["artistname"] === d["name"] ||
+          normalize(lartist["artist"]["artistname"]) === normalize(d["name"])
+        ) {
+          dartist = d;
+          didx = i;
+          break;
+        }
+      }
+      if (dartist) {
+        let posterFound = false;
+        for (const img of lartist["artist"]["images"] as any[]) {
+          if (img["CoverType"] === "Poster") {
+            posterFound = true;
+            break;
+          }
+        }
+        if (!posterFound) {
+          (lartist["artist"]["images"] as any[]).push({
+            CoverType: "Poster",
+            Url: dartist["picture_xl"],
+          });
+        }
+        lartist["artist"]["oldids"].push(fakeId(dartist["id"], "artist"));
+      }
+
+      lidarr[lidx] = lartist;
     }
 
-    console.log(`Suche nach: "${query}"`);
-    
-    // Hole Deemix-Ergebnisse
-    let deemixArtists = [];
-    try {
-        deemixArtists = await searchDeemixArtists(query);
-        console.log(`  → ${deemixArtists.length} Künstler von Deemix gefunden`);
-    } catch (e) {
-        console.error('Fehler bei Deemix-Suche:', e);
+    if (didx > -1) {
+      dartists.splice(didx, 1);
     }
-    
-    // Erstelle Set mit bereits vorhandenen Künstlern (case-insensitive)
-    const existingNames = new Set(
-        (lidarrResults || [])
-            .filter(item => item?.artist?.artistName)
-            .map(item => normalize(item.artist.artistName))
-    );
-    
-    // Erstelle Deemix-Suchergebnisse
-    const deemixResults = [];
-    
-    for (const artist of deemixArtists) {
-        // Skip wenn Künstler bereits in MusicBrainz-Ergebnissen
-        if (existingNames.has(normalize(artist.name))) {
-            continue;
+
+    let dtolartists: any[] = dartists.map((d) => ({
+      artist: {
+        artistaliases: [],
+        artistname: d["name"],
+        sortname: (d["name"] as string).split(" ").reverse().join(", "),
+        genres: [],
+        id: `${fakeId(d["id"], "artist")}`,
+        images: [
+          {
+            CoverType: "Poster",
+            Url: d["picture_xl"],
+          },
+        ],
+        links: [
+          {
+            target: d["link"],
+            type: "deezer",
+          },
+        ],
+        type:
+          (d["type"] as string).charAt(0).toUpperCase() +
+          (d["type"] as string).slice(1),
+      },
+    }));
+
+    if (lidarr.length === 0) {
+      const sorted = [];
+
+      for (const a of dtolartists) {
+        if (
+          a.artist.artistname === decodeURIComponent(query) ||
+          normalize(a.artist.artistname) === normalize(decodeURIComponent(query))
+        ) {
+          sorted.unshift(a);
+        } else {
+          sorted.push(a);
         }
-        
-        const artistId = fakeId(artist.id, "artist");
-        
-        // Suchergebnis-Objekt für UI
-        deemixResults.push({
-            artist: {
-                id: artistId,
-                foreignArtistId: artistId,
-                artistName: artist.name,
-                sortName: artist.name.split(" ").reverse().join(", "),
-                disambiguation: "",
-                overview: `Von Deezer verfügbar (${artist.nb_fan || 0} Fans)`,
-                status: "active",
-                type: "Artist",
-                images: artist.picture_xl ? [
-                    {
-                        coverType: "Poster",
-                        url: artist.picture_xl
-                    }
-                ] : [],
-                links: [],
-                genres: []
-            }
-        });
+      }
+      dtolartists = sorted;
     }
-    
-    console.log(`  → ${lidarrResults?.length || 0} MusicBrainz + ${deemixResults.length} neue Deemix = ${(lidarrResults?.length || 0) + deemixResults.length} gesamt`);
-    
-    // IMMER Deemix-Ergebnisse anzeigen!
-    // Bei MusicBrainz-Ausfall nur Deemix
-    if (!lidarrResults || lidarrResults.length === 0) {
-        console.log("MusicBrainz nicht verfügbar - verwende nur Deemix");
-        return deemixResults;
+
+    if (!isManual) {
+      dtolartists = dtolartists.map((a) => a.artist);
+      if (process.env.OVERRIDE_MB === "true") {
+        dtolartists = [
+          dtolartists.filter((a) => {
+            return (
+              a["artistname"] === decodeURIComponent(query) ||
+              normalize(a["artistname"]) === normalize(decodeURIComponent(query))
+            );
+          })[0],
+        ];
+      }
     }
-    
-    // Kombiniere beide Quellen
+
+    lidarr = [...lidarr, ...dtolartists];
+
+    if (process.env.OVERRIDE_MB === "true") {
+      lidarr = dtolartists;
+    }
+
+    return lidarr;
+  } catch (error) {
+    console.error("Error in search:", error);
+    return lidarr || [];
+  }
+}
+
+async function getArtistByName(name: string) {
+  try {
+    const artists = await searchDeemixArtists(name);
+    const artist = artists.find(
+      (a) => a["name"] === name || normalize(a["name"]) === normalize(name)
+    );
+    return artist;
+  } catch (error) {
+    console.error("Error getting artist by name:", error);
+    return undefined;
+  }
+}
+
+export async function getArtist(lidarr: any) {
+  try {
+    if (lidarr["error"]) return lidarr;
+    const artist = await getArtistByName(lidarr["artistname"]);
+    if (typeof artist === "undefined") {
+      return lidarr;
+    }
+    let posterFound = false;
+    for (const img of lidarr["images"] as any[]) {
+      if (img["CoverType"] === "Poster") {
+        posterFound = true;
+        break;
+      }
+    }
+    if (!posterFound) {
+      (lidarr["images"] as any[]).push({
+        CoverType: "Poster",
+        Url: artist!["picture_xl"],
+      });
+    }
+
+    const albums = await getAlbums(lidarr["artistname"]);
+
+    let existing = lidarr["Albums"].map((a: any) => normalize(a["Title"]));
     if (process.env.PRIO_DEEMIX === "true") {
-        // Deemix zuerst
-        return [...deemixResults, ...lidarrResults];
+      existing = albums.map((a: any) => normalize(a["Title"]));
     }
-    
-    // Standard: MusicBrainz zuerst, dann Deemix
-    return [...lidarrResults, ...deemixResults];
+    if (process.env.OVERRIDE_MB === "true") {
+      lidarr["images"] = [
+        {
+          CoverType: "Poster",
+          Url: artist!["picture_xl"],
+        },
+      ];
+      lidarr["Albums"] = albums;
+    } else {
+      if (process.env.PRIO_DEEMIX === "true") {
+        lidarr["Albums"] = [
+          ...lidarr["Albums"].filter(
+            (a: any) => !existing.includes(normalize(a["Title"]))
+          ),
+          ...albums,
+        ];
+      } else {
+        lidarr["Albums"] = [
+          ...lidarr["Albums"],
+          ...albums.filter((a) => !existing.includes(normalize(a["Title"]))),
+        ];
+      }
+    }
+
+    return lidarr;
+  } catch (error) {
+    console.error("Error getting artist:", error);
+    return lidarr;
+  }
 }
