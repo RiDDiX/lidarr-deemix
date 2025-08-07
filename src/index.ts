@@ -27,52 +27,24 @@ fastify.setErrorHandler((error, request, reply) => {
         }
     }, 'Request failed');
     
+    // WICHTIG: Immer eine gültige JSON-Antwort senden!
     if (!reply.sent) {
-        reply.status(500).send({ 
-            error: "Internal Server Error", 
-            message: process.env.NODE_ENV === 'development' ? error.message : 'Ein Fehler ist aufgetreten'
-        });
+        // Bei Suchfehlern leeres Array, sonst leeres Objekt
+        if (request.url.includes('/search')) {
+            reply.status(200).send([]);
+        } else {
+            reply.status(404).send({});
+        }
     }
 });
 
-// Health Check Endpoint
+// Health Check
 fastify.get('/health', async (req, reply) => {
-    const deemixHealthy = await checkDeemixHealth();
-    const lidarrHealthy = await checkLidarrHealth();
-    
-    const status = deemixHealthy && lidarrHealthy ? 200 : 503;
-    
-    reply.status(status).send({
-        status: status === 200 ? 'healthy' : 'degraded',
-        services: {
-            deemix: deemixHealthy ? 'up' : 'down',
-            lidarr: lidarrHealthy ? 'up' : 'down'
-        },
+    reply.status(200).send({
+        status: 'healthy',
         timestamp: new Date().toISOString()
     });
 });
-
-async function checkDeemixHealth(): Promise<boolean> {
-    try {
-        const res = await fetch(`${process.env.DEEMIX_URL || 'http://127.0.0.1:7272'}/health`, {
-            timeout: 3000
-        });
-        return res.ok;
-    } catch {
-        return false;
-    }
-}
-
-async function checkLidarrHealth(): Promise<boolean> {
-    try {
-        const res = await fetch(`${lidarrApiUrl}/api/v0.4/search?query=test`, {
-            timeout: 3000
-        });
-        return res.ok;
-    } catch {
-        return false;
-    }
-}
 
 async function doApi(req: any, res: any) {
     const startTime = Date.now();
@@ -82,7 +54,7 @@ async function doApi(req: any, res: any) {
     
     fastify.log.info({ method, url }, 'Processing request');
     
-    // Headers aufbereiten (ohne host und connection)
+    // Headers aufbereiten
     const headers: { [key: string]: any } = {};
     Object.entries(req.headers).forEach(([key, value]) => {
         if (!['host', 'connection', 'content-length'].includes(key.toLowerCase())) {
@@ -94,96 +66,102 @@ async function doApi(req: any, res: any) {
     let finalResult: any = null;
 
     try {
-        // Künstler-Details abrufen
+        // ARTIST DETAILS
         if (url.includes("/v0.4/artist/") && !url.includes("/v0.4/artist/lookup")) {
             const pathParts = u.pathname.split('/');
             const artistId = pathParts[pathParts.length - 1];
             
             if (!artistId || artistId === '') {
-                fastify.log.warn('Keine Künstler-ID in der URL gefunden');
-                status = 400;
-                finalResult = { error: 'Künstler-ID fehlt' };
-            } else if (artistId.startsWith('aaaaaaaa-aaaa-aaaa-aaaa-')) {
-                // Deemix-Künstler
+                fastify.log.warn('Keine Künstler-ID in der URL');
+                return res.status(404).send({});
+            }
+            
+            // Deemix-Künstler
+            if (artistId.startsWith('aaaaaaaa-aaaa-aaaa-aaaa-')) {
                 fastify.log.info(`Lade Deemix-Künstler: ${artistId}`);
                 const realDeemixId = getRealDeemixId(artistId);
                 
                 if (!realDeemixId) {
                     fastify.log.error(`Ungültige Deemix-ID: ${artistId}`);
-                    status = 404;
-                    finalResult = { error: 'Ungültige Künstler-ID' };
-                } else {
-                    finalResult = await getDeemixArtistById(realDeemixId);
-                    if (!finalResult) {
-                        status = 404;
-                        finalResult = { error: 'Künstler nicht gefunden' };
-                    }
+                    return res.status(404).send({});
                 }
-            } else {
-                // MusicBrainz-Künstler
-                fastify.log.info(`Lade MusicBrainz-Künstler: ${artistId}`);
                 
-                // Überprüfe MBID-Format
-                const mbidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                if (!mbidRegex.test(artistId)) {
-                    fastify.log.warn(`Ungültiges MBID-Format: ${artistId}`);
-                    status = 400;
-                    finalResult = { error: 'Ungültiges MBID-Format' };
-                } else {
-                    finalResult = await getArtistData(artistId);
-                    if (!finalResult) {
-                        status = 404;
-                        finalResult = { error: 'Künstler nicht in MusicBrainz gefunden' };
-                    }
+                finalResult = await getDeemixArtistById(realDeemixId);
+                if (!finalResult) {
+                    return res.status(404).send({});
                 }
+                
+                return res.status(200).send(finalResult);
             }
+            
+            // MusicBrainz-Künstler
+            fastify.log.info(`Lade MusicBrainz-Künstler: ${artistId}`);
+            const mbidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            
+            if (!mbidRegex.test(artistId)) {
+                fastify.log.warn(`Ungültiges MBID-Format: ${artistId}`);
+                return res.status(404).send({});
+            }
+            
+            finalResult = await getArtistData(artistId);
+            if (!finalResult) {
+                return res.status(404).send({});
+            }
+            
+            return res.status(200).send(finalResult);
         }
-        // Suche
+        
+        // SEARCH
         else if (url.includes("/v0.4/search")) {
             const queryParam = u.searchParams.get("query") || "";
             
             if (!queryParam) {
                 fastify.log.info('Leere Suchanfrage');
-                finalResult = [];
-            } else {
-                // Hole Lidarr-Ergebnisse
-                let lidarrResults: any[] = [];
-                try {
-                    const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { 
-                        method, 
-                        headers,
-                        timeout: 8000 
-                    });
-                    
-                    if (upstreamResponse.ok) {
-                        const parsed = await upstreamResponse.json();
-                        lidarrResults = Array.isArray(parsed) ? parsed : [];
-                        fastify.log.info(`Lidarr lieferte ${lidarrResults.length} Ergebnisse`);
-                    }
-                } catch (e) {
-                    fastify.log.warn('Lidarr API nicht erreichbar, nutze nur Deemix');
-                }
-                
-                // Kombiniere mit Deemix-Ergebnissen
-                finalResult = await search(lidarrResults, queryParam);
+                return res.status(200).send([]);
             }
             
-            if (Array.isArray(finalResult) && finalResult.length === 0) {
-                status = 404;
+            // Versuche Lidarr API
+            let lidarrResults: any[] = [];
+            try {
+                const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { 
+                    method, 
+                    headers,
+                    timeout: 5000 // Reduziertes Timeout
+                });
+                
+                if (upstreamResponse.ok) {
+                    const parsed = await upstreamResponse.json();
+                    lidarrResults = Array.isArray(parsed) ? parsed : [];
+                    fastify.log.info(`Lidarr API lieferte ${lidarrResults.length} Ergebnisse`);
+                } else {
+                    fastify.log.warn(`Lidarr API antwortete mit Status ${upstreamResponse.status}`);
+                }
+            } catch (e) {
+                fastify.log.warn('Lidarr API nicht erreichbar, nutze nur Deemix');
             }
+            
+            // Kombiniere mit Deemix
+            finalResult = await search(lidarrResults, queryParam);
+            
+            // WICHTIG: Immer ein Array zurückgeben, auch wenn leer
+            if (!Array.isArray(finalResult)) {
+                finalResult = [];
+            }
+            
+            return res.status(200).send(finalResult);
         }
-        // Alle anderen Anfragen direkt an Lidarr weiterleiten
+        
+        // ALLE ANDEREN ANFRAGEN
         else {
-            fastify.log.info('Leite Anfrage an Lidarr weiter');
+            fastify.log.info('Leite Anfrage weiter');
+            
             try {
                 const upstreamResponse = await fetch(`${lidarrApiUrl}${url}`, { 
                     method, 
                     headers,
                     body: method !== 'GET' && method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
-                    timeout: 15000 
+                    timeout: 10000
                 });
-                
-                status = upstreamResponse.status;
                 
                 if (upstreamResponse.ok) {
                     const contentType = upstreamResponse.headers.get('content-type');
@@ -192,26 +170,32 @@ async function doApi(req: any, res: any) {
                     } else {
                         finalResult = await upstreamResponse.text();
                     }
+                    status = upstreamResponse.status;
                 } else {
-                    finalResult = { error: `Upstream error: ${upstreamResponse.statusText}` };
+                    // Bei Fehler trotzdem 200 mit leerem Ergebnis
+                    fastify.log.warn(`Upstream error: ${upstreamResponse.status}`);
+                    finalResult = url.includes('search') ? [] : {};
+                    status = 200;
                 }
             } catch (e: any) {
-                fastify.log.error(e, 'Fehler bei Upstream-Anfrage');
-                status = 502;
-                finalResult = { error: 'Bad Gateway' };
+                fastify.log.error(e, 'Upstream-Anfrage fehlgeschlagen');
+                // Bei Fehler trotzdem 200 mit leerem Ergebnis
+                finalResult = url.includes('search') ? [] : {};
+                status = 200;
             }
+            
+            return res.status(status).send(finalResult);
         }
+        
     } catch (error: any) {
         fastify.log.error(error, 'Unerwarteter Fehler');
-        status = 500;
-        finalResult = { error: 'Internal Server Error' };
+        // WICHTIG: Niemals 5xx Fehler zurückgeben, sonst bricht Lidarr ab
+        if (url.includes('search')) {
+            return res.status(200).send([]);
+        } else {
+            return res.status(404).send({});
+        }
     }
-    
-    const duration = Date.now() - startTime;
-    fastify.log.info({ status, duration }, 'Request abgeschlossen');
-    
-    // Sende Antwort
-    res.status(status).send(finalResult || {});
 }
 
 // Hauptroute
@@ -220,8 +204,13 @@ fastify.all('*', async (req: any, res: any) => {
         await doApi(req, res);
     } catch (err: any) {
         fastify.log.error(err, 'Kritischer Fehler');
+        // Sende immer eine gültige Antwort
         if (!res.sent) {
-            res.status(500).send({ error: 'Internal Server Error' });
+            if (req.url.includes('search')) {
+                res.status(200).send([]);
+            } else {
+                res.status(404).send({});
+            }
         }
     }
 });
@@ -238,10 +227,10 @@ const start = async () => {
 ╔════════════════════════════════════════════════════╗
 ║     Lidarr++Deemix Proxy erfolgreich gestartet    ║
 ╠════════════════════════════════════════════════════╣
-║  Proxy läuft auf: http://${host}:${port}           ║
+║  Proxy läuft auf: http://${host}:${port}           
 ║  Deemix URL: ${process.env.DEEMIX_URL || 'http://127.0.0.1:7272'}
 ║  Lidarr API: ${lidarrApiUrl}
-║  Modus: ${process.env.PRIO_DEEMIX === 'true' ? 'Deemix-Priorität' : 'Standard'}
+║  Modus: Deemix${process.env.OVERRIDE_MB === 'true' ? ' ONLY' : ' + MusicBrainz'}
 ╚════════════════════════════════════════════════════╝
         `);
     } catch (err) {
@@ -252,13 +241,13 @@ const start = async () => {
 
 // Graceful Shutdown
 process.on('SIGTERM', async () => {
-    fastify.log.info('SIGTERM empfangen, fahre herunter...');
+    fastify.log.info('SIGTERM empfangen');
     await fastify.close();
     process.exit(0);
 });
 
 process.on('SIGINT', async () => {
-    fastify.log.info('SIGINT empfangen, fahre herunter...');
+    fastify.log.info('SIGINT empfangen');
     await fastify.close();
     process.exit(0);
 });

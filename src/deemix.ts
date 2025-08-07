@@ -256,19 +256,7 @@ export async function getDeemixArtistById(deemixId: string): Promise<any> {
         // Genres
         genres: [],
         
-        // WICHTIG: Artists-Dictionary für Lidarr's MapTrack
-        // Dies ist der zweite Teil des Fixes!
-        artists: {
-            [artistId]: {
-                id: artistId,
-                foreignArtistId: artistId,
-                artistName: artistName,
-                sortName: artistName.split(" ").reverse().join(", "),
-                disambiguation: "",
-                status: "active",
-                type: "Artist"
-            }
-        },
+    
         
         // Alben
         Albums: albums,
@@ -349,16 +337,19 @@ export async function search(lidarrResults: any[], query: string): Promise<any[]
     
     console.log(`Suchergebnisse: ${lidarrResults.length} MusicBrainz, ${deemixResults.length} Deemix`);
     
-    // Bei API-Ausfall nur Deemix verwenden
+    // IMMER Deemix-Ergebnisse verwenden, auch wenn MusicBrainz verfügbar ist
+    // Bei API-Ausfall nur Deemix
     if (lidarrResults.length === 0 && deemixResults.length > 0) {
         console.log("MusicBrainz/Lidarr API nicht verfügbar - verwende nur Deemix");
         return deemixResults;
     }
     
-    // Priorisierung basierend auf Umgebungsvariable
+    // Kombiniere IMMER beide Quellen
+    // Deemix-Ergebnisse werden immer hinzugefügt
     if (process.env.PRIO_DEEMIX === "true") {
         return [...deemixResults, ...lidarrResults];
     }
     
+    // Standard: MusicBrainz zuerst, dann Deemix
     return [...lidarrResults, ...deemixResults];
 }
