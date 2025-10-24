@@ -1,7 +1,13 @@
 import Fastify from 'fastify';
 import { createProxyMiddleware } from 'http-proxy-middleware';
-import { search, getArtist, getAlbum } from './deemix.js';
-import { getAllLidarrArtists } from './lidarr.js';
+import {
+  search,
+  getArtist,
+  getAlbum,
+  deemixArtist,
+  decodeFakeId,
+  isFakeId,
+} from './deemix.js';
 
 const fastify = Fastify({
   logger: {
@@ -32,7 +38,7 @@ const proxyOptions = {
   proxyTimeout: 30000,
   logLevel: 'info' as 'info',
   onError: (err: Error, req: any, res: any) => {
-    fastify.log.error('Proxy error:', err.message);
+    fastify.log.error({ err }, 'Proxy error');
     if (!res.headersSent) {
       res.writeHead(502, {
         'Content-Type': 'application/json',
@@ -70,7 +76,7 @@ const proxyOptions = {
                   data = [];
                 }
               } catch (parseError) {
-                fastify.log.warn('Failed to parse upstream response:', parseError.message);
+            fastify.log.warn({ err: parseError }, 'Failed to parse upstream response');
                 data = [];
               }
             }
@@ -81,7 +87,7 @@ const proxyOptions = {
               data = deemixResults;
               fastify.log.info(`Enhanced search results with Deemix data: ${data.length} total results`);
             } catch (deemixError) {
-              fastify.log.error('Deemix search failed:', deemixError.message);
+              fastify.log.error({ err: deemixError }, 'Deemix search failed');
             }
             
             // Send response
@@ -91,7 +97,7 @@ const proxyOptions = {
             });
             res.end(JSON.stringify(data));
           } catch (error) {
-            fastify.log.error('Error processing search response:', error.message);
+            fastify.log.error({ err: error }, 'Error processing search response');
             res.writeHead(200, {
               'Content-Type': 'application/json',
               'Access-Control-Allow-Origin': '*'
@@ -107,8 +113,42 @@ const proxyOptions = {
     // Handle artist info requests
     const artistMatch = req.url && req.url.match(/\/artists?\/([^/?]+)/);
     if (artistMatch) {
-      const artistId = artistMatch[1];
+      const artistId = decodeURIComponent(artistMatch[1]);
       fastify.log.info(`Artist info request for ID: ${artistId}`);
+
+      if (isFakeId(artistId, 'artist')) {
+        const realId = decodeFakeId(artistId, 'artist');
+        if (!realId) {
+          fastify.log.error(`Unable to decode Deemix artist ID for ${artistId}`);
+          res.writeHead(404, {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          });
+          res.end(JSON.stringify({ error: 'Artist not found' }));
+          return;
+        }
+
+        try {
+          const deemixData = await deemixArtist(realId);
+          if (deemixData) {
+            res.writeHead(200, {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*'
+            });
+            res.end(JSON.stringify(deemixData));
+            return;
+          }
+        } catch (deemixError: any) {
+          fastify.log.error({ err: deemixError }, 'Deemix artist fetch failed');
+        }
+
+        res.writeHead(404, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify({ error: 'Artist not found' }));
+        return;
+      }
       
       proxyRes.on('data', (chunk: Buffer) => {
         body += chunk.toString();
@@ -123,31 +163,18 @@ const proxyOptions = {
             try {
               artistData = JSON.parse(body);
             } catch (parseError) {
-              fastify.log.warn('Failed to parse upstream artist response:', parseError.message);
+              fastify.log.warn({ err: parseError }, 'Failed to parse upstream artist response');
             }
           }
           
           // If no upstream data or fake ID, use Deemix
-          if (!artistData || artistId.startsWith('aaaaaaaa-aaaa-aaaa-aaaa-aaaaa')) {
-            try {
-              // Get artist from Deemix
-              const deemixArtist = await getArtist({ artistname: 'Unknown', Albums: [], images: [] });
-              if (deemixArtist && deemixArtist.artistname !== 'Unknown') {
-                artistData = deemixArtist;
-                fastify.log.info(`Provided Deemix artist data for: ${artistData.artistname}`);
-              }
-            } catch (deemixError) {
-              fastify.log.error('Deemix artist fetch failed:', deemixError.message);
-            }
-          }
-          
           // Enhance with Deemix data if we have upstream data
-          if (artistData && artistData.artistname && !artistId.startsWith('aaaaaaaa-aaaa-aaaa-aaaa-aaaaa')) {
+          if (artistData && artistData.artistname) {
             try {
               artistData = await getArtist(artistData);
               fastify.log.info(`Enhanced artist data with Deemix: ${artistData.artistname}`);
             } catch (deemixError) {
-              fastify.log.error('Deemix artist enhancement failed:', deemixError.message);
+              fastify.log.error({ err: deemixError }, 'Deemix artist enhancement failed');
             }
           }
           
@@ -166,7 +193,7 @@ const proxyOptions = {
             res.end(JSON.stringify({ error: 'Artist not found' }));
           }
         } catch (error: any) {
-          fastify.log.error('Error processing artist response:', error.message);
+          fastify.log.error({ err: error }, 'Error processing artist response');
           res.writeHead(500, {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*'
@@ -181,15 +208,14 @@ const proxyOptions = {
     // Handle album info requests  
     const albumMatch = req.url && req.url.match(/\/albums?\/([^/?]+)/);
     if (albumMatch) {
-      const albumId = albumMatch[1];
+      const albumId = decodeURIComponent(albumMatch[1]);
       fastify.log.info(`Album info request for ID: ${albumId}`);
-      
-      if (albumId.startsWith('bbbbbbbb-bbbb-bbbb-bbbb-bbbbb')) {
-        // This is a Deemix fake album ID
+
+      if (isFakeId(albumId, 'album')) {
         try {
-          const realId = albumId.substring(albumId.length - 12).replace(/^b+/, '');
+          const realId = decodeFakeId(albumId, 'album');
           const albumData = await getAlbum(realId);
-          
+
           if (albumData) {
             res.writeHead(200, {
               'Content-Type': 'application/json',
@@ -199,7 +225,7 @@ const proxyOptions = {
             return;
           }
         } catch (deemixError: any) {
-          fastify.log.error('Deemix album fetch failed:', deemixError.message);
+          fastify.log.error({ err: deemixError }, 'Deemix album fetch failed');
         }
         
         res.writeHead(404, {
@@ -218,16 +244,22 @@ const proxyOptions = {
 
 // Create proxy middleware
 const proxy = createProxyMiddleware(proxyOptions);
+const proxyHandler = proxy as unknown as (
+  req: any,
+  res: any,
+  next: (err?: any) => void
+) => void;
 
 // Apply proxy to all routes
 fastify.register((fastify, opts, done) => {
   fastify.all('*', (request, reply) => {
     return new Promise<void>((resolve, reject) => {
-      proxy(request.raw, reply.raw, (err?: Error) => {
+      proxyHandler(request.raw, reply.raw, (err?: any) => {
         if (err) {
-          fastify.log.error('Proxy middleware error:', err.message);
+          fastify.log.error({ err }, 'Proxy middleware error');
           if (!reply.sent) {
-            reply.code(502).send({ error: 'Proxy error', message: err.message });
+            const message = typeof err?.message === 'string' ? err.message : 'Proxy error';
+            reply.code(502).send({ error: 'Proxy error', message });
           }
         }
         resolve();
@@ -239,7 +271,7 @@ fastify.register((fastify, opts, done) => {
 
 // Error handler
 fastify.setErrorHandler(async (error, request, reply) => {
-  fastify.log.error('Server error:', error.message);
+  fastify.log.error({ err: error }, 'Server error');
   
   if (!reply.sent) {
     reply.code(500).send({ 
@@ -260,7 +292,7 @@ const start = async () => {
     fastify.log.info('📡 Proxying to: https://api.lidarr.audio');
     fastify.log.info('🎵 Deemix integration enabled');
   } catch (err) {
-    fastify.log.error('Failed to start server:', err);
+    fastify.log.error({ err }, 'Failed to start server');
     process.exit(1);
   }
 };
@@ -280,12 +312,12 @@ process.on('SIGINT', async () => {
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
-  fastify.log.fatal('Uncaught exception:', err);
+  fastify.log.fatal({ err }, 'Uncaught exception');
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  fastify.log.fatal('Unhandled rejection at:', promise, 'reason:', reason);
+  fastify.log.fatal({ promise, reason }, 'Unhandled rejection');
   process.exit(1);
 });
 

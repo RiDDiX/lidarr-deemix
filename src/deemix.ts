@@ -2,31 +2,51 @@ import _ from "lodash";
 const deemixUrl = "http://127.0.0.1:7272";
 import { getAllLidarrArtists } from "./lidarr.js";
 import { titleCase, normalize } from "./helpers.js";
-import { link } from "fs";
 
-function fakeId(id: any, type: string) {
-  // artist
-  let p = "a";
+export type DeemixEntityType =
+  | "artist"
+  | "album"
+  | "track"
+  | "release"
+  | "recording";
 
-  if (type === "album") {
-    p = "b";
-  }
-  if (type === "track") {
-    p = "c";
-  }
-  if (type === "release") {
-    p = "d";
-  }
-  if (type === "recording") {
-    p = "e";
-  }
+const TYPE_PREFIX: Record<DeemixEntityType, string> = {
+  artist: "a",
+  album: "b",
+  track: "c",
+  release: "d",
+  recording: "e",
+};
+
+export function fakeId(id: any, type: DeemixEntityType) {
+  const prefix = TYPE_PREFIX[type];
   id = `${id}`;
-  id = id.padStart(12, p);
+  id = id.padStart(12, prefix);
 
-  return `${"".padStart(8, p)}-${"".padStart(4, p)}-${"".padStart(
+  return `${"".padStart(8, prefix)}-${"".padStart(4, prefix)}-${"".padStart(
     4,
-    p
-  )}-${"".padStart(4, p)}-${id}`;
+    prefix
+  )}-${"".padStart(4, prefix)}-${id}`;
+}
+
+export function isFakeId(id: string | undefined | null, type: DeemixEntityType) {
+  if (!id) return false;
+  const prefix = TYPE_PREFIX[type];
+  const expected = `${prefix.repeat(8)}-${prefix.repeat(4)}-${prefix.repeat(4)}-${prefix.repeat(4)}-`;
+  return id.startsWith(expected);
+}
+
+export function decodeFakeId(
+  id: string | undefined | null,
+  type: DeemixEntityType
+): string | null {
+  if (!id || !isFakeId(id, type)) {
+    return null;
+  }
+  const prefix = TYPE_PREFIX[type];
+  const suffix = id.slice(-12);
+  const realId = suffix.replace(new RegExp(`^${prefix}+`), "");
+  return realId || null;
 }
 
 async function searchDeemixArtists(name: string): Promise<[]> {
@@ -198,28 +218,84 @@ export async function getAlbum(id: string) {
 
     const lidarrArtists = await getAllLidarrArtists();
 
-    let lidarr = null;
-    let deemix = null;
+    let lidarr: any = null;
+    let deemixMatch: any = null;
 
-    for (let la of lidarrArtists) {
-      for (let c of contributors) {
+    for (const la of lidarrArtists) {
+      for (const c of contributors) {
         if (
           la["artistName"] === c["artistname"] ||
           normalize(la["artistName"]) === normalize(c["artistname"])
         ) {
           lidarr = la;
-          deemix = c;
+          deemixMatch = c;
+          break;
         }
       }
+      if (lidarr) break;
     }
 
-    let lidarr2: any = {};
+    const fallbackContributor =
+      deemixMatch ||
+      contributors[0] ||
+      (d["artist"]
+        ? {
+            id: fakeId(d["artist"]["id"], "artist"),
+            artistaliases: [],
+            artistname: d["artist"]["name"],
+            disambiguation: "",
+            overview: "!!--Imported from Deemix--!!",
+            genres: [],
+            images: [],
+            links: d["artist"]["link"]
+              ? [
+                  {
+                    target: d["artist"]["link"],
+                    type: "deezer",
+                  },
+                ]
+              : [],
+            oldids: [],
+            sortname: (d["artist"]["name"] as string)
+              .split(" ")
+              .reverse()
+              .join(", "),
+            status: "active",
+            type: "Artist",
+          }
+        : null);
+
+    const buildArtistPayload = (artist: any) => ({
+      id: artist["id"],
+      artistname: artist["artistname"],
+      artistaliases: artist["artistaliases"] || [],
+      disambiguation: artist["disambiguation"] || "",
+      overview: artist["overview"] || "",
+      genres: artist["genres"] || [],
+      images: artist["images"] || [],
+      links: artist["links"] || [],
+      oldids: artist["oldids"] || [],
+      sortname:
+        artist["sortname"] ||
+        (artist["artistname"] as string)
+          .split(" ")
+          .reverse()
+          .join(", "),
+      status: artist["status"] || "active",
+      type: artist["type"] || "Artist",
+    });
+
+    let lidarr2: any;
 
     if (process.env.OVERRIDE_MB === "true") {
-      lidarr = deemix;
-      lidarr2 = {
-        id: lidarr["id"],
-        artistname: lidarr["artistname"],
+      if (!fallbackContributor) {
+        throw new Error("Could not determine Deemix artist for album");
+      }
+      lidarr2 = buildArtistPayload(fallbackContributor);
+    } else if (lidarr) {
+      lidarr2 = buildArtistPayload({
+        id: lidarr["foreignArtistId"],
+        artistname: lidarr["artistName"],
         artistaliases: [],
         disambiguation: "",
         overview: "",
@@ -227,25 +303,17 @@ export async function getAlbum(id: string) {
         images: [],
         links: [],
         oldids: [],
-        sortname: lidarr["artistname"].split(" ").reverse().join(", "),
+        sortname: (lidarr["artistName"] as string)
+          .split(" ")
+          .reverse()
+          .join(", "),
         status: "active",
         type: "Artist",
-      };
+      });
+    } else if (fallbackContributor) {
+      lidarr2 = buildArtistPayload(fallbackContributor);
     } else {
-      lidarr2 = {
-        id: lidarr!["foreignArtistId"],
-        artistname: lidarr!["artistName"],
-        artistaliases: [],
-        disambiguation: "",
-        overview: "",
-        genres: [],
-        images: [],
-        links: [],
-        oldids: [],
-        sortname: lidarr!["artistName"].split(" ").reverse().join(", "),
-        status: "active",
-        type: "Artist",
-      };
+      throw new Error("Unable to resolve artist information for album");
     }
 
     const tracks = await deemixTracks(d["id"]);
