@@ -49,7 +49,8 @@ WORKDIR /app
 RUN apk add --no-cache \
     bash \
     curl \
-    nodejs
+    nodejs \
+    mitmproxy
 
 # Copy Python packages from builder
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
@@ -74,18 +75,19 @@ RUN chmod +x /app/run.sh
 RUN mkdir -p /app/logs /app/config /app/downloads
 
 # Environment defaults
-ENV PORT=8080 \
+ENV MITM_PORT=8080 \
+    PROXY_PORT=7171 \
     DEEMIX_PORT=7272 \
     DEEMIX_URL=http://127.0.0.1:7272 \
     LOG_LEVEL=info \
     NODE_ENV=production
 
-# Expose proxy port
+# Expose proxy port (mitmproxy)
 EXPOSE 8080
 
-# Health check
+# Health check (check NodeJS API server)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -sf http://localhost:${PORT}/health || exit 1
+    CMD curl -sf http://localhost:7171/health || exit 1
 
 # Start application
 CMD ["/app/run.sh"]
