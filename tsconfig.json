@@ -1,13 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "extends": [
-    "@tsconfig/node20/tsconfig.json"
-  ],
   "compilerOptions": {
     "outDir": "./dist",
     "rootDir": "./src",
     "module": "ES2022",
     "target": "ES2022",
+    "lib": ["ES2022"],
     "moduleResolution": "node",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -21,7 +19,8 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noImplicitAny": false,
-    "useUnknownInCatchVariables": false
+    "useUnknownInCatchVariables": false,
+    "types": ["node"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
