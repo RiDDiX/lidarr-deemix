@@ -1,4 +1,3 @@
-import fetch from "node-fetch";
 import { FastifyRequest, FastifyReply } from "fastify";
 import { removeKeys } from "./helpers.js";
 
@@ -15,18 +14,23 @@ export async function proxyToScrobbler(req: FastifyRequest, reply: FastifyReply)
     }
   }
 
-  const fetchOpts: any = {
+  const fetchOpts: RequestInit = {
     method: req.method,
     headers,
     body: req.method !== "GET" && req.method !== "HEAD" ? JSON.stringify(req.body) : undefined,
   };
 
   const res = await fetch(url, fetchOpts);
-  let json = await res.json();
+  let json: any = await res.json();
 
   if (process.env.OVERRIDE_MB === "true") {
     json = removeKeys(json, ["mbid"]);
   }
 
-  reply.status(res.status).headers(res.headers.raw()).send(json);
+  const responseHeaders: Record<string, string> = {};
+  res.headers.forEach((value, key) => {
+    responseHeaders[key] = value;
+  });
+
+  reply.status(res.status).headers(responseHeaders).send(json);
 }
