@@ -1,4 +1,3 @@
-import fetch from "node-fetch";
 import { normalize, titleCase } from "./helpers.js";
 
 const MB_BASE_URL = "https://musicbrainz.org/ws/2";
@@ -14,7 +13,7 @@ export async function getArtistData(mbid: string): Promise<any> {
     const res = await fetch(artistUrl, { headers: { 'User-Agent': USER_AGENT } });
     if (!res.ok) return null;
     
-    const artist = await res.json();
+    const artist: any = await res.json();
     if (!artist) return null;
 
     // Alben verarbeiten (Release Groups)

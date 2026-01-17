@@ -2,63 +2,68 @@ version: '3.8'
 
 services:
   lidarr-deemix:
-    build: .
-    image: lidarr-deemix:latest
+    image: ghcr.io/riddix/lidarr-deemix:latest
+    # Alternativ: lokal bauen mit
+    # build: .
     container_name: lidarr-deemix
     restart: unless-stopped
     ports:
-      - "8080:8080"  # mitmproxy port
+      - "8080:8080"
     environment:
-      # WICHTIG: Deine Deezer ARL hier eintragen!
+      # ===========================================
+      # REQUIRED: Your Deezer ARL token
+      # Get it from: deezer.com -> DevTools -> Cookies -> arl
+      # ===========================================
       - DEEMIX_ARL=${DEEMIX_ARL}
       
-      # Proxy Einstellungen
-      - PROXY_PORT=7171
-      - PROXY_HOST=0.0.0.0
-      
-      # Deemix Server Einstellungen
-      - DEEMIX_URL=http://127.0.0.1:7272
-      - DEEMIX_PORT=7272
-      - DEEMIX_HOST=0.0.0.0
-      
-      # Lidarr API (normalerweise nicht ändern)
-      - LIDARR_API_URL=https://api.lidarr.audio
-      
-      # Optional: Lidarr-Instanz für erweiterte Features
-      - LIDARR_URL=${LIDARR_URL:-http://lidarr:8686}
-      - LIDARR_API_KEY=${LIDARR_API_KEY}
-      
-      # Feature Flags
-      - OVERRIDE_MB=${OVERRIDE_MB:-false}
+      # ===========================================
+      # OPTIONAL: Feature Flags
+      # ===========================================
+      # Prioritize Deezer albums over MusicBrainz
       - PRIO_DEEMIX=${PRIO_DEEMIX:-false}
-      - FALLBACK_DEEZER=${FALLBACK_DEEZER:-true}
       
-      # Logging
+      # Use Deezer data ONLY (ignore MusicBrainz)
+      # WARNING: This will remove MB-imported artists!
+      - OVERRIDE_MB=${OVERRIDE_MB:-false}
+      
+      # ===========================================
+      # OPTIONAL: Lidarr Connection (for OVERRIDE_MB)
+      # ===========================================
+      - LIDARR_URL=${LIDARR_URL:-}
+      - LIDARR_API_KEY=${LIDARR_API_KEY:-}
+      
+      # ===========================================
+      # OPTIONAL: Logging
+      # ===========================================
       - LOG_LEVEL=${LOG_LEVEL:-info}
-      - NODE_ENV=${NODE_ENV:-production}
       
     volumes:
-      # Config Verzeichnis für Deemix
       - ./config:/app/config
-      
-      # Logs persistent speichern
       - ./logs:/app/logs
       
-      # Downloads (falls Download-Feature genutzt wird)
-      - ./downloads:/app/downloads
-      
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7171/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-      
-    networks:
-      - lidarr-network
 
-# Netzwerk für Lidarr-Integration
-networks:
-  lidarr-network:
-    driver: bridge
-    name: lidarr-network
+# ===========================================
+# Example: Full stack with Lidarr
+# ===========================================
+#   lidarr:
+#     image: linuxserver/lidarr:latest
+#     container_name: lidarr
+#     environment:
+#       - PUID=1000
+#       - PGID=1000
+#       - TZ=Europe/Berlin
+#     volumes:
+#       - ./lidarr-config:/config
+#       - ./music:/music
+#     ports:
+#       - "8686:8686"
+#     # Configure in Lidarr UI:
+#     # Settings -> General -> Use Proxy -> HTTP(S)
+#     # Hostname: lidarr-deemix
+#     # Port: 8080

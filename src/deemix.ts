@@ -1,14 +1,20 @@
 import _ from "lodash";
-const deemixUrl = "http://127.0.0.1:7272";
 import { getAllLidarrArtists } from "./lidarr.js";
 import { titleCase, normalize } from "./helpers.js";
+import type {
+  DeemixEntityType,
+  LidarrArtist,
+  LidarrAlbumBasic,
+  LidarrAlbumFull,
+  LidarrSearchResult,
+  DeezerArtist,
+  DeezerAlbum,
+  DeezerTrack,
+  DeezerArtistFull,
+} from "./types.js";
 
-export type DeemixEntityType =
-  | "artist"
-  | "album"
-  | "track"
-  | "release"
-  | "recording";
+const DEEMIX_URL = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
+const FETCH_TIMEOUT = 10000;
 
 const TYPE_PREFIX: Record<DeemixEntityType, string> = {
   artist: "a",
@@ -18,41 +24,41 @@ const TYPE_PREFIX: Record<DeemixEntityType, string> = {
   recording: "e",
 };
 
-export function fakeId(id: any, type: DeemixEntityType) {
+export function fakeId(id: string | number, type: DeemixEntityType): string {
   const prefix = TYPE_PREFIX[type];
-  id = `${id}`;
-  id = id.padStart(12, prefix);
-
-  return `${"".padStart(8, prefix)}-${"".padStart(4, prefix)}-${"".padStart(
-    4,
-    prefix
-  )}-${"".padStart(4, prefix)}-${id}`;
+  const idStr = String(id).padStart(12, prefix);
+  return `${prefix.repeat(8)}-${prefix.repeat(4)}-${prefix.repeat(4)}-${prefix.repeat(4)}-${idStr}`;
 }
 
-export function isFakeId(id: string | undefined | null, type: DeemixEntityType) {
+export function isFakeId(id: string | undefined | null, type: DeemixEntityType): boolean {
   if (!id) return false;
   const prefix = TYPE_PREFIX[type];
   const expected = `${prefix.repeat(8)}-${prefix.repeat(4)}-${prefix.repeat(4)}-${prefix.repeat(4)}-`;
   return id.startsWith(expected);
 }
 
-export function decodeFakeId(
-  id: string | undefined | null,
-  type: DeemixEntityType
-): string | null {
-  if (!id || !isFakeId(id, type)) {
-    return null;
-  }
+export function decodeFakeId(id: string | undefined | null, type: DeemixEntityType): string | null {
+  if (!id || !isFakeId(id, type)) return null;
   const prefix = TYPE_PREFIX[type];
   const suffix = id.slice(-12);
-  const realId = suffix.replace(new RegExp(`^${prefix}+`), "");
-  return realId || null;
+  return suffix.replace(new RegExp(`^${prefix}+`), "") || null;
+}
+
+async function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return response;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function searchDeemixArtists(name: string): Promise<[]> {
   try {
     const data = await fetch(
-      `${deemixUrl}/search/artists?limit=100&offset=0&q=${name}`
+      `${DEEMIX_URL}/search/artists?limit=100&offset=0&q=${name}`
     );
     if (!data.ok) {
       console.error(`Deemix artist search failed: ${data.status}`);
@@ -68,7 +74,7 @@ async function searchDeemixArtists(name: string): Promise<[]> {
 
 export async function deemixAlbum(id: string): Promise<any> {
   try {
-    const data = await fetch(`${deemixUrl}/albums/${id}`);
+    const data = await fetch(`${DEEMIX_URL}/albums/${id}`);
     if (!data.ok) {
       console.error(`Deemix album fetch failed: ${data.status}`);
       return null;
@@ -83,7 +89,7 @@ export async function deemixAlbum(id: string): Promise<any> {
 
 export async function deemixTracks(id: string): Promise<any> {
   try {
-    const data = await fetch(`${deemixUrl}/album/${id}/tracks`);
+    const data = await fetch(`${DEEMIX_URL}/album/${id}/tracks`);
     if (!data.ok) {
       console.error(`Deemix tracks fetch failed: ${data.status}`);
       return { data: [] };
@@ -98,7 +104,7 @@ export async function deemixTracks(id: string): Promise<any> {
 
 export async function deemixArtist(id: string): Promise<any> {
   try {
-    const data = await fetch(`${deemixUrl}/artists/${id}`);
+    const data = await fetch(`${DEEMIX_URL}/artists/${id}`);
     if (!data.ok) {
       console.error(`Deemix artist fetch failed: ${data.status}`);
       return null;
@@ -148,7 +154,7 @@ async function deemixAlbums(name: string): Promise<any[]> {
     let total = 0;
     let start = 0;
     const data = await fetch(
-      `${deemixUrl}/search/albums?limit=1&offset=0&q=${name}`
+      `${DEEMIX_URL}/search/albums?limit=1&offset=0&q=${name}`
     );
 
     if (!data.ok) {
@@ -162,7 +168,7 @@ async function deemixAlbums(name: string): Promise<any[]> {
     const albums: any[] = [];
     while (start < total) {
       const data = await fetch(
-        `${deemixUrl}/search/albums?limit=100&offset=${start}&q=${name}`
+        `${DEEMIX_URL}/search/albums?limit=100&offset=${start}&q=${name}`
       );
       if (!data.ok) {
         console.error(`Deemix albums batch fetch failed: ${data.status}`);
@@ -403,12 +409,21 @@ export async function getAlbums(name: string) {
 }
 
 export async function search(
-  lidarr: any,
+  lidarr: any[],
   query: string,
   isManual: boolean = true
-) {
+): Promise<any[]> {
+  // Ensure lidarr is always an array
+  if (!Array.isArray(lidarr)) {
+    lidarr = [];
+  }
+  
+  let dartists: any[] = [];
   try {
-    const dartists = await searchDeemixArtists(query);
+    dartists = await searchDeemixArtists(query);
+  } catch (error) {
+    console.error("Deemix artist search failed, continuing with Lidarr data only:", error);
+  }
 
     let lartist;
     let lidx = -1;
@@ -520,10 +535,6 @@ export async function search(
     }
 
     return lidarr;
-  } catch (error) {
-    console.error("Error in search:", error);
-    return lidarr || [];
-  }
 }
 
 async function getArtistByName(name: string) {

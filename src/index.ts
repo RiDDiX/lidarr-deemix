@@ -1,5 +1,4 @@
 import Fastify from 'fastify';
-import { createProxyMiddleware } from 'http-proxy-middleware';
 import {
   search,
   getArtist,
@@ -9,9 +8,13 @@ import {
   isFakeId,
 } from './deemix.js';
 
+const LIDARR_API_URL = 'https://api.lidarr.audio';
+const API_VERSION = 'v0.4';
+const FETCH_TIMEOUT = 30000;
+
 const fastify = Fastify({
   logger: {
-    level: 'info',
+    level: process.env.LOG_LEVEL || 'info',
     transport: {
       target: 'pino-pretty',
       options: {
@@ -23,262 +26,212 @@ const fastify = Fastify({
   }
 });
 
+async function fetchFromLidarr(path: string): Promise<any> {
+  const url = `${LIDARR_API_URL}${path}`;
+  fastify.log.debug(`Fetching from Lidarr: ${url}`);
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+  
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'LidarrDeemixProxy/2.0',
+        'Accept': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        return null;
+      }
+      throw new Error(`Lidarr API error: ${response.status}`);
+    }
+    
+    return await response.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 // Health check endpoint
-fastify.get('/health', async (request, reply) => {
+fastify.get('/health', async () => {
   return { status: 'ok', timestamp: new Date().toISOString() };
 });
 
-// Proxy configuration
-const proxyOptions = {
-  target: 'https://api.lidarr.audio',
-  changeOrigin: true,
-  secure: true,
-  followRedirects: true,
-  timeout: 30000,
-  proxyTimeout: 30000,
-  logLevel: 'info' as 'info',
-  onError: (err: Error, req: any, res: any) => {
-    fastify.log.error({ err }, 'Proxy error');
-    if (!res.headersSent) {
-      res.writeHead(502, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      });
-      res.end(JSON.stringify({ error: 'Proxy error', message: err.message }));
-    }
-  },
-  onProxyReq: (proxyReq: any, req: any, res: any) => {
-    fastify.log.info(`Proxying request: ${req.method} ${req.url}`);
-  },
-  onProxyRes: async (proxyRes: any, req: any, res: any) => {
-    let body = '';
-    
-    // Handle search requests
-    if (req.url && req.url.includes('/search')) {
-      const searchMatch = req.url.match(/[?&]term=([^&]+)/);
-      if (searchMatch) {
-        const searchTerm = decodeURIComponent(searchMatch[1]);
-        fastify.log.info(`Search request for: ${searchTerm}`);
-        
-        proxyRes.on('data', (chunk: Buffer) => {
-          body += chunk.toString();
-        });
-        
-        proxyRes.on('end', async () => {
-          try {
-            let data = [];
-            
-            // Try to parse upstream response
-            if (body.trim()) {
-              try {
-                data = JSON.parse(body);
-                if (!Array.isArray(data)) {
-                  data = [];
-                }
-              } catch (parseError) {
-            fastify.log.warn({ err: parseError }, 'Failed to parse upstream response');
-                data = [];
-              }
-            }
-            
-            // Always add Deemix results
-            try {
-              const deemixResults = await search(data, searchTerm, true);
-              data = deemixResults;
-              fastify.log.info(`Enhanced search results with Deemix data: ${data.length} total results`);
-            } catch (deemixError) {
-              fastify.log.error({ err: deemixError }, 'Deemix search failed');
-            }
-            
-            // Send response
-            res.writeHead(200, {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*'
-            });
-            res.end(JSON.stringify(data));
-          } catch (error) {
-            fastify.log.error({ err: error }, 'Error processing search response');
-            res.writeHead(200, {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*'
-            });
-            res.end(JSON.stringify([]));
-          }
-        });
-        
-        return; // Don't send the original response
+// Search endpoint - /api/v0.4/search
+fastify.get('/api/:version/search', async (request, reply) => {
+  const { version } = request.params as { version: string };
+  const { type, query, term } = request.query as { type?: string; query?: string; term?: string };
+  const searchTerm = query || term || '';
+  const searchType = type || 'all';
+  
+  fastify.log.info(`Search request: term="${searchTerm}" type="${searchType}"`);
+  
+  try {
+    // Fetch from Lidarr API
+    let lidarrData: any[] = [];
+    try {
+      // Note: URLSearchParams encodes spaces as '+', but Lidarr API expects '%20'
+      const encodedQuery = encodeURIComponent(searchTerm);
+      const data = await fetchFromLidarr(`/api/${version}/search?type=${searchType}&query=${encodedQuery}`);
+      if (Array.isArray(data)) {
+        lidarrData = data;
       }
+    } catch (error) {
+      fastify.log.warn({ err: error }, 'Failed to fetch from Lidarr API, using Deemix only');
     }
     
-    // Handle artist info requests
-    const artistMatch = req.url && req.url.match(/\/artists?\/([^/?]+)/);
-    if (artistMatch) {
-      const artistId = decodeURIComponent(artistMatch[1]);
-      fastify.log.info(`Artist info request for ID: ${artistId}`);
-
-      if (isFakeId(artistId, 'artist')) {
-        const realId = decodeFakeId(artistId, 'artist');
-        if (!realId) {
-          fastify.log.error(`Unable to decode Deemix artist ID for ${artistId}`);
-          res.writeHead(404, {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-          });
-          res.end(JSON.stringify({ error: 'Artist not found' }));
-          return;
-        }
-
-        try {
-          const deemixData = await deemixArtist(realId);
-          if (deemixData) {
-            res.writeHead(200, {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*'
-            });
-            res.end(JSON.stringify(deemixData));
-            return;
-          }
-        } catch (deemixError: any) {
-          fastify.log.error({ err: deemixError }, 'Deemix artist fetch failed');
-        }
-
-        res.writeHead(404, {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        });
-        res.end(JSON.stringify({ error: 'Artist not found' }));
-        return;
-      }
-      
-      proxyRes.on('data', (chunk: Buffer) => {
-        body += chunk.toString();
-      });
-      
-      proxyRes.on('end', async () => {
-        try {
-          let artistData = null;
-          
-          // Try to parse upstream response
-          if (body.trim()) {
-            try {
-              artistData = JSON.parse(body);
-            } catch (parseError) {
-              fastify.log.warn({ err: parseError }, 'Failed to parse upstream artist response');
-            }
-          }
-          
-          // If no upstream data or fake ID, use Deemix
-          // Enhance with Deemix data if we have upstream data
-          if (artistData && artistData.artistname) {
-            try {
-              artistData = await getArtist(artistData);
-              fastify.log.info(`Enhanced artist data with Deemix: ${artistData.artistname}`);
-            } catch (deemixError) {
-              fastify.log.error({ err: deemixError }, 'Deemix artist enhancement failed');
-            }
-          }
-          
-          // Send response
-          if (artistData) {
-            res.writeHead(200, {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*'
-            });
-            res.end(JSON.stringify(artistData));
-          } else {
-            res.writeHead(404, {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*'
-            });
-            res.end(JSON.stringify({ error: 'Artist not found' }));
-          }
-        } catch (error: any) {
-          fastify.log.error({ err: error }, 'Error processing artist response');
-          res.writeHead(500, {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-          });
-          res.end(JSON.stringify({ error: 'Internal server error' }));
-        }
-      });
-      
-      return; // Don't send the original response
+    // Log Lidarr data before enhancement
+    fastify.log.info(`Lidarr data received: ${lidarrData.length} results`);
+    
+    // Enhance with Deemix results (if Deemix is available)
+    let enhancedResults: any[];
+    try {
+      enhancedResults = await search(lidarrData, searchTerm, true);
+    } catch (searchError) {
+      fastify.log.warn({ err: searchError }, 'Deemix enhancement failed, returning Lidarr data only');
+      enhancedResults = lidarrData;
     }
     
-    // Handle album info requests  
-    const albumMatch = req.url && req.url.match(/\/albums?\/([^/?]+)/);
-    if (albumMatch) {
-      const albumId = decodeURIComponent(albumMatch[1]);
-      fastify.log.info(`Album info request for ID: ${albumId}`);
-
-      if (isFakeId(albumId, 'album')) {
-        try {
-          const realId = decodeFakeId(albumId, 'album');
-          const albumData = await getAlbum(realId);
-
-          if (albumData) {
-            res.writeHead(200, {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*'
-            });
-            res.end(JSON.stringify(albumData));
-            return;
-          }
-        } catch (deemixError: any) {
-          fastify.log.error({ err: deemixError }, 'Deemix album fetch failed');
-        }
-        
-        res.writeHead(404, {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        });
-        res.end(JSON.stringify({ error: 'Album not found' }));
-        return;
-      }
-    }
+    fastify.log.info(`Search results: ${lidarrData.length} from Lidarr, ${enhancedResults.length} total after enhancement`);
     
-    // For all other requests, pass through normally
-    // Don't modify the response, just let it pass through
+    return enhancedResults;
+  } catch (error) {
+    fastify.log.error({ err: error }, 'Search failed completely');
+    return [];
   }
-};
+});
 
-// Create proxy middleware
-const proxy = createProxyMiddleware(proxyOptions);
-const proxyHandler = proxy as unknown as (
-  req: any,
-  res: any,
-  next: (err?: any) => void
-) => void;
+// Artist endpoint - /api/v0.4/artist/{id}
+fastify.get('/api/:version/artist/:artistId', async (request, reply) => {
+  const { version, artistId } = request.params as { version: string; artistId: string };
+  
+  fastify.log.info(`Artist request: ${artistId}`);
+  
+  // Check if this is a Deemix fake ID
+  if (isFakeId(artistId, 'artist')) {
+    const realId = decodeFakeId(artistId, 'artist');
+    if (!realId) {
+      reply.code(404);
+      return { error: 'Artist not found' };
+    }
+    
+    try {
+      const artistData = await deemixArtist(realId);
+      if (artistData) {
+        return artistData;
+      }
+    } catch (error) {
+      fastify.log.error({ err: error }, 'Deemix artist fetch failed');
+    }
+    
+    reply.code(404);
+    return { error: 'Artist not found' };
+  }
+  
+  // Fetch from Lidarr and enhance with Deemix
+  try {
+    let artistData = await fetchFromLidarr(`/api/${version}/artist/${artistId}`);
+    
+    if (!artistData) {
+      reply.code(404);
+      return { error: 'Artist not found' };
+    }
+    
+    // Enhance with Deemix data
+    if (artistData.artistname) {
+      artistData = await getArtist(artistData);
+      fastify.log.info(`Enhanced artist: ${artistData.artistname}`);
+    }
+    
+    return artistData;
+  } catch (error) {
+    fastify.log.error({ err: error }, 'Artist fetch failed');
+    reply.code(500);
+    return { error: 'Internal server error' };
+  }
+});
 
-// Apply proxy to all routes
-fastify.register((fastify, opts, done) => {
-  fastify.all('*', (request, reply) => {
-    return new Promise<void>((resolve, reject) => {
-      proxyHandler(request.raw, reply.raw, (err?: any) => {
-        if (err) {
-          fastify.log.error({ err }, 'Proxy middleware error');
-          if (!reply.sent) {
-            const message = typeof err?.message === 'string' ? err.message : 'Proxy error';
-            reply.code(502).send({ error: 'Proxy error', message });
-          }
-        }
-        resolve();
-      });
+// Album endpoint - /api/v0.4/album/{id}
+fastify.get('/api/:version/album/:albumId', async (request, reply) => {
+  const { version, albumId } = request.params as { version: string; albumId: string };
+  
+  fastify.log.info(`Album request: ${albumId}`);
+  
+  // Check if this is a Deemix fake ID
+  if (isFakeId(albumId, 'album')) {
+    const realId = decodeFakeId(albumId, 'album');
+    if (!realId) {
+      reply.code(404);
+      return { error: 'Album not found' };
+    }
+    
+    try {
+      const albumData = await getAlbum(realId);
+      if (albumData) {
+        return albumData;
+      }
+    } catch (error) {
+      fastify.log.error({ err: error }, 'Deemix album fetch failed');
+    }
+    
+    reply.code(404);
+    return { error: 'Album not found' };
+  }
+  
+  // Fetch from Lidarr
+  try {
+    const albumData = await fetchFromLidarr(`/api/${version}/album/${albumId}`);
+    
+    if (!albumData) {
+      reply.code(404);
+      return { error: 'Album not found' };
+    }
+    
+    return albumData;
+  } catch (error) {
+    fastify.log.error({ err: error }, 'Album fetch failed');
+    reply.code(500);
+    return { error: 'Internal server error' };
+  }
+});
+
+// Catch-all proxy for other endpoints
+fastify.all('/api/*', async (request, reply) => {
+  const path = request.url;
+  fastify.log.info(`Proxying: ${request.method} ${path}`);
+  
+  try {
+    const response = await fetch(`${LIDARR_API_URL}${path}`, {
+      method: request.method,
+      headers: {
+        'User-Agent': 'LidarrDeemixProxy/2.0',
+        'Accept': 'application/json',
+      },
     });
-  });
-  done();
+    
+    reply.code(response.status);
+    
+    const contentType = response.headers.get('content-type');
+    if (contentType) {
+      reply.header('Content-Type', contentType);
+    }
+    
+    const data = await response.text();
+    return reply.send(data);
+  } catch (error) {
+    fastify.log.error({ err: error }, 'Proxy request failed');
+    reply.code(502);
+    return { error: 'Bad Gateway' };
+  }
 });
 
 // Error handler
 fastify.setErrorHandler(async (error, request, reply) => {
   fastify.log.error({ err: error }, 'Server error');
-  
-  if (!reply.sent) {
-    reply.code(500).send({ 
-      error: 'Internal server error', 
-      message: error.message 
-    });
-  }
+  reply.code(500).send({ error: 'Internal server error', message: error.message });
 });
 
 // Start server

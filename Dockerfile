@@ -1,78 +1,91 @@
+# =============================================================================
+#  Lidarr-Deemix v2.0 - Multi-Stage Docker Build
+# =============================================================================
+
 # =================
-#  Stufe 1: Builder
+#  Stage 1: Builder
 # =================
 FROM python:3.12-alpine AS builder
 
 WORKDIR /app
 
-# Installiere Build-Tools
+# Build dependencies
 RUN apk add --no-cache \
     bash \
     build-base \
+    curl \
     libffi-dev \
     nodejs \
     npm \
     openssl-dev
 
-# Installiere pnpm global
-RUN npm i -g pnpm
-
-# --- Python Abhängigkeiten ---
+# --- Python dependencies ---
 COPY python/requirements.txt ./python/requirements.txt
 RUN python -m pip install --upgrade pip && \
     python -m pip install --no-cache-dir -r python/requirements.txt
 
-# --- Node.js Abhängigkeiten ---
-# Kopiere package.json (ohne pnpm-lock.yaml, da die Versionen nicht übereinstimmen)
+# --- Node.js dependencies ---
 COPY package.json ./
+RUN npm install --omit=dev
 
-# Installiere Dependencies ohne Lock-File
-RUN pnpm install --no-frozen-lockfile
-
-# Kopiere TypeScript-Source
+# --- TypeScript compilation ---
 COPY tsconfig.json ./
 COPY src ./src
-
-# Kompiliere TypeScript
-RUN pnpm run build
+RUN npm run build
 
 # =================
-#  Stufe 2: Runtime
+#  Stage 2: Runtime
 # =================
 FROM python:3.12-alpine
 
+LABEL org.opencontainers.image.title="Lidarr-Deemix"
+LABEL org.opencontainers.image.description="Enrich Lidarr with Deezer metadata via proxy"
+LABEL org.opencontainers.image.version="2.0.0"
+LABEL org.opencontainers.image.source="https://github.com/RiDDiX/lidarr-deemix"
+
 WORKDIR /app
 
-# Installiere nur Runtime-Abhängigkeiten
-RUN apk add --no-cache nodejs mitmproxy bash
+# Runtime dependencies only
+RUN apk add --no-cache \
+    bash \
+    curl \
+    nodejs
 
-# Kopiere Python-Pakete vom Builder
+# Copy Python packages from builder
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 
-# Kopiere Node-Module vom Builder
+# Copy Node modules from builder
 COPY --from=builder /app/node_modules ./node_modules
 
-# Kopiere kompilierten JavaScript-Code
+# Copy compiled JavaScript
 COPY --from=builder /app/dist ./dist
 
-# Kopiere Python-Skripte
+# Copy Python scripts
 COPY python ./python
 
-# Kopiere package.json für Node
+# Copy package.json
 COPY package.json ./
 
-# Kopiere run.sh
+# Copy and setup run script
 COPY run.sh /app/run.sh
-
-# Mache run.sh ausführbar
 RUN chmod +x /app/run.sh
 
-# Exponiere Ports
-EXPOSE 8080 7171 7272
+# Create directories
+RUN mkdir -p /app/logs /app/config /app/downloads
 
-# Health Check
+# Environment defaults
+ENV PORT=8080 \
+    DEEMIX_PORT=7272 \
+    DEEMIX_URL=http://127.0.0.1:7272 \
+    LOG_LEVEL=info \
+    NODE_ENV=production
+
+# Expose proxy port
+EXPOSE 8080
+
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:7171/health || exit 1
+    CMD curl -sf http://localhost:${PORT}/health || exit 1
 
-# Starte die Anwendung
+# Start application
 CMD ["/app/run.sh"]
