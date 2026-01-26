@@ -7,29 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.0] - 2026-01-26
 
-### 🎯 Intelligente Album-Deduplizierung
+### 🎯 Smart Album Deduplication
 
 #### Added
-- **Smart Album Deduplication**: Intelligente Erkennung und Zusammenführung von Album-Duplikaten
-  - Erkennt verschiedene Editionen desselben Albums (Deluxe, Extended, Remastered, etc.)
-  - Gruppiert Alben nach Base-Titel (z.B. "Album", "Album (Deluxe)", "Album [Remastered]" → eine Gruppe)
-  - Wählt automatisch die "beste" Version basierend auf Scoring-System
-- **Album Scoring System**: Qualitätsbewertung für Alben
-  - Track-Anzahl: Mehr Tracks = höherer Score
-  - Explicit-Version: Uncensored-Versionen werden bevorzugt
-  - Edition-Präferenz: Konfigurierbar via `PREFER_SPECIAL_EDITIONS`
-- **Neue Umgebungsvariable**: `PREFER_SPECIAL_EDITIONS`
-  - `false` (Standard): Original-Alben werden bevorzugt
-  - `true`: Deluxe/Extended-Editionen werden bevorzugt
-- **Logging**: Detaillierte Logs bei Album-Deduplizierung zeigen gewählte und verworfene Versionen
+- **Smart Album Deduplication**: Intelligent detection and merging of duplicate albums
+  - Detects different editions of the same album (Deluxe, Extended, Remastered, etc.)
+  - Groups albums by base title (e.g., "Album", "Album (Deluxe)", "Album [Remastered]" → one group)
+  - Automatically selects the "best" version based on scoring system
+- **Album Scoring System**: Quality rating for albums
+  - Track count: More tracks = higher score
+  - Explicit version: Uncensored versions are preferred
+  - Edition preference: Configurable via `PREFER_SPECIAL_EDITIONS`
+- **New Environment Variable**: `PREFER_SPECIAL_EDITIONS`
+  - `false` (default): Original albums are preferred
+  - `true`: Deluxe/Extended editions are preferred
+- **Logging**: Detailed logs during album deduplication show selected and discarded versions
 
 #### Changed
-- **Edition-Erkennung**: Umfangreiche Liste von Edition-Suffixen (Deluxe, Extended, Remastered, Anniversary, Collector's, etc.)
-- **Base-Titel-Extraktion**: Entfernt Klammern `()`, `[]`, `{}` und Edition-Suffixe für korrektes Grouping
+- **Edition Detection**: Comprehensive list of edition suffixes (Deluxe, Extended, Remastered, Anniversary, Collector's, etc.)
+- **Base Title Extraction**: Removes brackets `()`, `[]`, `{}` and edition suffixes for correct grouping
 
 #### Fixed
-- **Duplikat-Handling**: Deezer liefert oft mehrere Versionen desselben Albums - jetzt wird nur die beste behalten
-- **False Positives**: "Album 1" und "Album 1 Part 2" werden korrekt als unterschiedliche Alben erkannt
+- **Duplicate Handling**: Deezer often returns multiple versions of the same album - now only the best one is kept
+- **False Positives**: "Album 1" and "Album 1 Part 2" are correctly recognized as different albums
 
 ---
 
