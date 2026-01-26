@@ -1,5 +1,6 @@
 {
   "name": "lidarr-deemix",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "start": "tsc && node ./dist/index.js",

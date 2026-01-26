@@ -68,6 +68,7 @@ services:
 | `PORT` | `8080` | Proxy server port |
 | `PRIO_DEEMIX` | `false` | Prioritize Deezer albums over MusicBrainz |
 | `OVERRIDE_MB` | `false` | Use Deezer data only (ignores MusicBrainz) |
+| `PREFER_SPECIAL_EDITIONS` | `false` | Prefer Deluxe/Extended editions over standard albums |
 | `LIDARR_URL` | - | Your Lidarr instance URL (for advanced features) |
 | `LIDARR_API_KEY` | - | Your Lidarr API key (for advanced features) |
 | `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
