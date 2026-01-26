@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-01-26
+
+### 🎯 Intelligente Album-Deduplizierung
+
+#### Added
+- **Smart Album Deduplication**: Intelligente Erkennung und Zusammenführung von Album-Duplikaten
+  - Erkennt verschiedene Editionen desselben Albums (Deluxe, Extended, Remastered, etc.)
+  - Gruppiert Alben nach Base-Titel (z.B. "Album", "Album (Deluxe)", "Album [Remastered]" → eine Gruppe)
+  - Wählt automatisch die "beste" Version basierend auf Scoring-System
+- **Album Scoring System**: Qualitätsbewertung für Alben
+  - Track-Anzahl: Mehr Tracks = höherer Score
+  - Explicit-Version: Uncensored-Versionen werden bevorzugt
+  - Edition-Präferenz: Konfigurierbar via `PREFER_SPECIAL_EDITIONS`
+- **Neue Umgebungsvariable**: `PREFER_SPECIAL_EDITIONS`
+  - `false` (Standard): Original-Alben werden bevorzugt
+  - `true`: Deluxe/Extended-Editionen werden bevorzugt
+- **Logging**: Detaillierte Logs bei Album-Deduplizierung zeigen gewählte und verworfene Versionen
+
+#### Changed
+- **Edition-Erkennung**: Umfangreiche Liste von Edition-Suffixen (Deluxe, Extended, Remastered, Anniversary, Collector's, etc.)
+- **Base-Titel-Extraktion**: Entfernt Klammern `()`, `[]`, `{}` und Edition-Suffixe für korrektes Grouping
+
+#### Fixed
+- **Duplikat-Handling**: Deezer liefert oft mehrere Versionen desselben Albums - jetzt wird nur die beste behalten
+- **False Positives**: "Album 1" und "Album 1 Part 2" werden korrekt als unterschiedliche Alben erkannt
+
+---
+
 ## [2.0.0] - 2026-01-17
 
 ### 🚀 Major Release - Complete Rewrite

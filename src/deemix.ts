@@ -1,6 +1,6 @@
 import _ from "lodash";
 import { getAllLidarrArtists } from "./lidarr.js";
-import { titleCase, normalize } from "./helpers.js";
+import { titleCase, normalize, deduplicateAlbums } from "./helpers.js";
 import type {
   DeemixEntityType,
   LidarrArtist,
@@ -389,7 +389,10 @@ export async function getAlbums(name: string) {
   try {
     const dalbums = await deemixAlbums(name);
 
-    let dtoRalbums = dalbums.map((d) => ({
+    // Intelligente Deduplizierung: Wählt das "beste" Album bei Duplikaten
+    const dedupedAlbums = deduplicateAlbums(dalbums);
+
+    const dtoRalbums = dedupedAlbums.map((d) => ({
       Id: `${fakeId(d["id"], "album")}`,
       OldIds: [],
       ReleaseStatuses: ["Official"],
@@ -398,8 +401,6 @@ export async function getAlbums(name: string) {
       LowerTitle: d["title"].toLowerCase(),
       Type: getType(d["record_type"]),
     }));
-
-    dtoRalbums = _.uniqBy(dtoRalbums, "LowerTitle");
 
     return dtoRalbums;
   } catch (error) {
