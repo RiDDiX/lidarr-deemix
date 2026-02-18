@@ -1,16 +1,51 @@
-"""Redirect HTTP requests to another server."""
+"""
+Redirect specific HTTP requests to the local Node.js proxy server.
 
+Only intercepts:
+  - api.lidarr.audio  → Metadata API (enhanced with Deezer data)
+  - ws.audioscrobbler.com → Scrobbler API (proxied through Node.js)
+
+All other hosts (indexers, download clients, notifications, etc.)
+pass through mitmproxy as a normal transparent proxy without interference.
+"""
+
+import logging
 from mitmproxy import http
+
+logger = logging.getLogger("lidarr-deemix")
+
+# Paths on api.lidarr.audio that should NOT be redirected to our proxy
+# These are passed through directly to the real API
+PASSTHROUGH_PATHS = (
+    "/api/v0.4/spotify/",
+)
+
+# Hosts we intercept and redirect to our Node.js server
+INTERCEPTED_HOSTS = {
+    "api.lidarr.audio",
+    "ws.audioscrobbler.com",
+}
+
+PROXY_HOST = "127.0.0.1"
+PROXY_PORT = 7171
 
 
 def request(flow: http.HTTPFlow) -> None:
-    # pretty_host takes the "Host" header of the request into account,
-    # which is useful in transparent mode where we usually only have the IP
-    # otherwise.
-    if flow.request.pretty_host == "https://api.lidarr.audio/api/v0.4/spotify/":
-        pass
-    elif flow.request.pretty_host == "api.lidarr.audio" or flow.request.pretty_host == "ws.audioscrobbler.com":
-        flow.request.headers["X-Proxy-Host"] = flow.request.pretty_host
-        flow.request.scheme = "http"
-        flow.request.host = "127.0.0.1"
-        flow.request.port = 7171
+    host = flow.request.pretty_host
+
+    # Only intercept specific hosts - everything else passes through unchanged
+    if host not in INTERCEPTED_HOSTS:
+        return
+
+    # api.lidarr.audio: skip certain paths (e.g. Spotify) - let them go direct
+    if host == "api.lidarr.audio":
+        for path_prefix in PASSTHROUGH_PATHS:
+            if flow.request.path.startswith(path_prefix):
+                logger.debug(f"Passthrough: {flow.request.path}")
+                return
+
+    # Redirect to local Node.js proxy
+    flow.request.headers["X-Proxy-Host"] = host
+    flow.request.scheme = "http"
+    flow.request.host = PROXY_HOST
+    flow.request.port = PROXY_PORT

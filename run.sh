@@ -62,7 +62,7 @@ else
 fi
 
 echo "→ Starte mitmproxy auf Port $MITM_PORT..."
-cd /app && mitmdump -s ./python/http-redirect-request.py --set stream_large_bodies=1 --listen-port $MITM_PORT > /app/logs/mitmdump.log 2>&1 &
+cd /app && mitmdump -s ./python/http-redirect-request.py --set stream_large_bodies=1 --listen-port $MITM_PORT --allow-hosts "^(api\.lidarr\.audio|ws\.audioscrobbler\.com)$" > /app/logs/mitmdump.log 2>&1 &
 MITM_PID=$!
 sleep 2
 
@@ -116,7 +116,7 @@ while true; do
     # Prüfe mitmproxy
     if ! kill -0 $MITM_PID 2>/dev/null; then
         echo "[$(date)] WARNUNG: mitmproxy abgestürzt! Neustart..."
-        cd /app && mitmdump -s ./python/http-redirect-request.py --set stream_large_bodies=1 --listen-port $MITM_PORT >> /app/logs/mitmdump.log 2>&1 &
+        cd /app && mitmdump -s ./python/http-redirect-request.py --set stream_large_bodies=1 --listen-port $MITM_PORT --allow-hosts "^(api\.lidarr\.audio|ws\.audioscrobbler\.com)$" >> /app/logs/mitmdump.log 2>&1 &
         MITM_PID=$!
     fi
     

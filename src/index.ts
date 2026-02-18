@@ -7,6 +7,7 @@ import {
   decodeFakeId,
   isFakeId,
 } from './deemix.js';
+import { proxyToScrobbler } from './scrobbler.js';
 
 const LIDARR_API_URL = 'https://api.lidarr.audio';
 const API_VERSION = 'v0.4';
@@ -198,19 +199,47 @@ fastify.get('/api/:version/album/:albumId', async (request, reply) => {
   }
 });
 
-// Catch-all proxy for other endpoints
+// Audioscrobbler proxy - handles ws.audioscrobbler.com requests redirected by mitmproxy
+fastify.all('/2.0/*', async (request, reply) => {
+  fastify.log.debug(`Scrobbler request: ${request.method} ${request.url}`);
+  return proxyToScrobbler(request, reply);
+});
+fastify.all('/2.0', async (request, reply) => {
+  fastify.log.debug(`Scrobbler request: ${request.method} ${request.url}`);
+  return proxyToScrobbler(request, reply);
+});
+
+// Catch-all proxy for other api.lidarr.audio endpoints
 fastify.all('/api/*', async (request, reply) => {
   const path = request.url;
   fastify.log.info(`Proxying: ${request.method} ${path}`);
   
   try {
-    const response = await fetch(`${LIDARR_API_URL}${path}`, {
+    // Build headers - forward relevant original headers
+    const headers: Record<string, string> = {
+      'User-Agent': 'LidarrDeemixProxy/2.0',
+      'Accept': 'application/json',
+    };
+    
+    // Forward content-type for requests with body
+    const incomingCT = request.headers['content-type'];
+    if (incomingCT && typeof incomingCT === 'string') {
+      headers['Content-Type'] = incomingCT;
+    }
+    
+    // Build fetch options - forward body for POST/PUT/PATCH
+    const fetchOpts: RequestInit = {
       method: request.method,
-      headers: {
-        'User-Agent': 'LidarrDeemixProxy/2.0',
-        'Accept': 'application/json',
-      },
-    });
+      headers,
+    };
+    
+    if (request.method !== 'GET' && request.method !== 'HEAD' && request.body) {
+      fetchOpts.body = typeof request.body === 'string'
+        ? request.body
+        : JSON.stringify(request.body);
+    }
+    
+    const response = await fetch(`${LIDARR_API_URL}${path}`, fetchOpts);
     
     reply.code(response.status);
     
