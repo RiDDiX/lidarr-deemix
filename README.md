@@ -65,10 +65,11 @@ services:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DEEMIX_ARL` | - | **Required** for Deezer integration. Your Deezer ARL token |
-| `PORT` | `8080` | Proxy server port |
+| `MITM_PORT` | `8080` | External proxy port (the port Lidarr connects to) |
 | `PRIO_DEEMIX` | `false` | Prioritize Deezer albums over MusicBrainz |
 | `OVERRIDE_MB` | `false` | Use Deezer data only (ignores MusicBrainz) |
 | `PREFER_SPECIAL_EDITIONS` | `false` | Prefer Deluxe/Extended editions over standard albums |
+| `DEEMIX_URL` | `http://127.0.0.1:7272` | Deemix server URL (only change for external Deemix instances) |
 | `LIDARR_URL` | - | Your Lidarr instance URL (for advanced features) |
 | `LIDARR_API_KEY` | - | Your Lidarr API key (for advanced features) |
 | `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
@@ -86,6 +87,10 @@ services:
 4. Click **Save**
 
 ![Lidarr Settings](./images/lidarr-deemix-conf.png)
+
+### Spotify Integration
+
+Lidarr's built-in **Spotify integration** (playlist imports, etc.) works automatically — no configuration needed. The proxy detects Spotify API requests (`/api/v0.4/spotify/*`) and passes them directly to `api.lidarr.audio` without interception.
 
 ---
 
@@ -119,17 +124,24 @@ environment:
 ## 📊 Architecture
 
 ```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Lidarr    │────▶│  Lidarr-Deemix   │────▶│ api.lidarr.audio│
-│             │     │   (Proxy:8080)   │     │   (MusicBrainz) │
-└─────────────┘     │                  │     └─────────────────┘
-                    │        +         │
-                    │    ┌───────┐     │
-                    │    │Deemix │     │
-                    │    │Server │     │
-                    │    └───────┘     │
-                    └──────────────────┘
+                         Lidarr-Deemix Container
+                    ┌─────────────────────────────────┐
+┌─────────────┐     │  ┌───────────┐   ┌───────────┐  │     ┌─────────────────┐
+│             │     │  │ mitmproxy │──▶│  Node.js  │──┼────▶│ api.lidarr.audio│
+│   Lidarr    │────▶│  │  (:8080)  │   │  (:7171)  │  │     │   (MusicBrainz) │
+│             │     │  └─────┬─────┘   └─────┬─────┘  │     └─────────────────┘
+└─────────────┘     │        │               │         │
+                    │        │          ┌────┴────┐    │
+                    │  passthrough      │  Deemix │    │
+                    │  (indexers,       │ (:7272) │    │
+                    │   downloads,      └─────────┘    │
+                    │   Spotify)                       │
+                    └─────────────────────────────────┘
 ```
+
+- **mitmproxy** — Only intercepts `api.lidarr.audio` and `ws.audioscrobbler.com`. All other traffic (indexers, download clients, notifications, Spotify) passes through as a clean TCP tunnel.
+- **Node.js** — Enhances metadata API responses with Deezer data, proxies audioscrobbler.
+- **Deemix** — Provides Deezer search, album/artist data, and download capabilities.
 
 ---
 
@@ -142,7 +154,11 @@ docker logs lidarr-deemix
 
 ### Health check
 ```bash
-curl http://localhost:8080/health
+# Docker built-in health status
+docker inspect --format='{{.State.Health.Status}}' lidarr-deemix
+
+# Or from inside the container
+docker exec lidarr-deemix curl -sf http://localhost:7171/health
 ```
 
 ### Common issues
@@ -171,14 +187,14 @@ See [CHANGELOG.md](./CHANGELOG.md) for version history.
 
 ## ☕ Support
 
-> **Dieses Projekt ist und bleibt kostenlos und Open Source.**
-> Ich entwickle es in meiner Freizeit, weil mir Open Source am Herzen liegt.
+> **This project is and will remain free and open source.**
+> I maintain it in my spare time because I believe in open source.
 
-Wenn dir das Projekt gefällt oder weiterhilft, kannst du mich gerne unterstützen:
+If you find this project useful, consider supporting its development:
 
-[![PayPal](https://img.shields.io/badge/PayPal-Spenden-blue?logo=paypal&style=for-the-badge)](https://www.paypal.me/RiDDiX93)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal&style=for-the-badge)](https://www.paypal.me/RiDDiX93)
 
-Jede Unterstützung hilft bei Hosting-Kosten und motiviert zur Weiterentwicklung. Danke! ❤️
+Your support helps cover hosting costs and motivates continued development. Thank you! ❤️
 
 ---
 
