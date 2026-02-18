@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-02-18
+
+### 🔧 Proxy & Indexer Fix
+
+#### Fixed
+- **Indexer/Release Search**: mitmproxy no longer MITM's indexer, download client and notification traffic. Added `--allow-hosts` so only `api.lidarr.audio` and `ws.audioscrobbler.com` are intercepted — all other HTTPS connections pass through as clean TCP tunnels
+- **Spotify API Bypass**: Fixed broken condition in `http-redirect-request.py` where `pretty_host` (hostname only) was compared against a full URL — Spotify API passthrough never worked
+- **Audioscrobbler Proxy**: `ws.audioscrobbler.com` was redirected to the Node.js server but no route handler existed (404). Scrobbler routes now properly registered
+- **Catch-All Proxy**: POST/PUT/PATCH requests (e.g. `search/fingerprint`) lost their body and headers. Now correctly forwarded to `api.lidarr.audio`
+- **Scrobbler Robustness**: Handle both JSON and XML responses from audioscrobbler (previously crashed on XML, which is the default format)
+
+#### Added
+- **GitHub Release Workflow**: Automatic GitHub Releases with changelog extraction on version tags
+- **Docker Version Tags**: Images now also tagged with major version (e.g. `ghcr.io/riddix/lidarr-deemix:2`)
+- **Support Section**: PayPal donation link in README
+
+#### Changed
+- **mitmproxy Script**: Complete rewrite with configurable `INTERCEPTED_HOSTS`, `PASSTHROUGH_PATHS`, and proper path-based filtering
+- **Docker Build**: Bumped `build-push-action` to v6, added QEMU setup, VERSION build-arg for image labels
+
+---
+
 ## [2.1.0] - 2026-01-26
 
 ### 🎯 Smart Album Deduplication

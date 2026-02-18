@@ -169,6 +169,19 @@ See [CHANGELOG.md](./CHANGELOG.md) for version history.
 
 ---
 
+## ☕ Support
+
+> **Dieses Projekt ist und bleibt kostenlos und Open Source.**
+> Ich entwickle es in meiner Freizeit, weil mir Open Source am Herzen liegt.
+
+Wenn dir das Projekt gefällt oder weiterhilft, kannst du mich gerne unterstützen:
+
+[![PayPal](https://img.shields.io/badge/PayPal-Spenden-blue?logo=paypal&style=for-the-badge)](https://www.paypal.me/RiDDiX93)
+
+Jede Unterstützung hilft bei Hosting-Kosten und motiviert zur Weiterentwicklung. Danke! ❤️
+
+---
+
 ## 📄 License
 
 MIT License - see [LICENSE](./LICENSE) for details
