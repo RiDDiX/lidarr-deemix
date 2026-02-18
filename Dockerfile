@@ -38,9 +38,11 @@ RUN npm run build
 # =================
 FROM python:3.12-alpine
 
+ARG VERSION=2.2.0
+
 LABEL org.opencontainers.image.title="Lidarr-Deemix"
 LABEL org.opencontainers.image.description="Enrich Lidarr with Deezer metadata via proxy"
-LABEL org.opencontainers.image.version="2.0.0"
+LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/RiDDiX/lidarr-deemix"
 
 WORKDIR /app
