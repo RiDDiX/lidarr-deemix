@@ -9,7 +9,6 @@ npm-debug.log
 yarn-error.log
 pnpm-lock.yaml
 yarn.lock
-package-lock.json
 
 # TypeScript Build
 dist
