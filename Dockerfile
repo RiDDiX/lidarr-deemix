@@ -25,13 +25,13 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install --no-cache-dir -r python/requirements.txt
 
 # --- Node.js dependencies ---
-COPY package.json ./
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci
 
 # --- TypeScript compilation ---
 COPY tsconfig.json ./
 COPY src ./src
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 
 # =================
 #  Stage 2: Runtime
