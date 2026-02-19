@@ -12,11 +12,11 @@
   },
   "devDependencies": {
     "@tsconfig/strictest": "^2.0.5",
-    "@types/latinize": "^0.2.18"
+    "@types/latinize": "^0.2.18",
+    "@types/node": "^25.3.0"
   },
   "dependencies": {
     "@types/lodash": "^4.17.0",
-    "@types/node": "^20.12.3",
     "dotenv": "^16.4.5",
     "fastify": "^4.26.2",
     "latinize": "^2.0.0",

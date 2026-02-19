@@ -55,17 +55,17 @@ async function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<R
   }
 }
 
-async function searchDeemixArtists(name: string): Promise<[]> {
+async function searchDeemixArtists(name: string): Promise<any[]> {
   try {
     const data = await fetch(
-      `${DEEMIX_URL}/search/artists?limit=100&offset=0&q=${name}`
+      `${DEEMIX_URL}/search/artists?limit=100&offset=0&q=${encodeURIComponent(name)}`
     );
     if (!data.ok) {
       console.error(`Deemix artist search failed: ${data.status}`);
       return [];
     }
     const j = (await data.json()) as any;
-    return j["data"] as [];
+    return Array.isArray(j["data"]) ? j["data"] : [];
   } catch (error) {
     console.error("Error searching Deemix artists:", error);
     return [];
@@ -154,7 +154,7 @@ async function deemixAlbums(name: string): Promise<any[]> {
     let total = 0;
     let start = 0;
     const data = await fetch(
-      `${DEEMIX_URL}/search/albums?limit=1&offset=0&q=${name}`
+      `${DEEMIX_URL}/search/albums?limit=1&offset=0&q=${encodeURIComponent(name)}`
     );
 
     if (!data.ok) {
@@ -168,7 +168,7 @@ async function deemixAlbums(name: string): Promise<any[]> {
     const albums: any[] = [];
     while (start < total) {
       const data = await fetch(
-        `${DEEMIX_URL}/search/albums?limit=100&offset=${start}&q=${name}`
+        `${DEEMIX_URL}/search/albums?limit=100&offset=${start}&q=${encodeURIComponent(name)}`
       );
       if (!data.ok) {
         console.error(`Deemix albums batch fetch failed: ${data.status}`);
@@ -497,6 +497,7 @@ export async function search(
           (d["type"] as string).charAt(0).toUpperCase() +
           (d["type"] as string).slice(1),
       },
+      album: null,
     }));
 
     if (lidarr.length === 0) {
