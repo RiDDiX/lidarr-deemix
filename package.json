@@ -1,6 +1,6 @@
 {
   "name": "lidarr-deemix",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "type": "module",
   "scripts": {
     "start": "tsc && node ./dist/index.js",
@@ -11,17 +11,16 @@
     "test": "tsc --noEmit"
   },
   "devDependencies": {
-    "@tsconfig/strictest": "^2.0.5",
     "@types/latinize": "^0.2.18",
-    "@types/node": "^25.3.0"
+    "@types/lodash": "^4.17.0",
+    "@types/node": "^25.3.0",
+    "tsc-watch": "^6.2.0",
+    "typescript": "^5.4.3"
   },
   "dependencies": {
-    "@types/lodash": "^4.17.0",
-    "dotenv": "^16.4.5",
     "fastify": "^4.26.2",
     "latinize": "^2.0.0",
     "lodash": "^4.17.21",
-    "pino-pretty": "^10.3.1",
-    "typescript": "^5.4.3"
+    "pino-pretty": "^10.3.1"
   }
 }

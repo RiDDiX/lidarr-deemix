@@ -10,6 +10,7 @@ pass through mitmproxy as a normal transparent proxy without interference.
 """
 
 import logging
+import os
 from mitmproxy import http
 
 logger = logging.getLogger("lidarr-deemix")
@@ -26,8 +27,11 @@ INTERCEPTED_HOSTS = {
     "ws.audioscrobbler.com",
 }
 
-PROXY_HOST = "127.0.0.1"
-PROXY_PORT = 7171
+PROXY_HOST = os.environ.get("PROXY_HOST", "127.0.0.1")
+try:
+    PROXY_PORT = int(os.environ.get("PROXY_PORT", "7171"))
+except ValueError:
+    PROXY_PORT = 7171
 
 
 def request(flow: http.HTTPFlow) -> None:

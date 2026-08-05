@@ -5,7 +5,7 @@
 
 [![Docker Build](https://github.com/RiDDiX/lidarr-deemix/actions/workflows/container.yml/badge.svg)](https://github.com/RiDDiX/lidarr-deemix/actions/workflows/container.yml)
 [![Version](https://img.shields.io/github/v/release/RiDDiX/lidarr-deemix?style=flat)](https://github.com/RiDDiX/lidarr-deemix/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/riddix/lidarr-deemix?style=flat)](https://github.com/RiDDiX/lidarr-deemix/pkgs/container/lidarr-deemix)
+[![Container Image](https://img.shields.io/badge/ghcr.io-riddix%2Flidarr--deemix-blue?logo=docker&style=flat)](https://github.com/RiDDiX/lidarr-deemix/pkgs/container/lidarr-deemix)
 
 </div>
 
@@ -35,20 +35,26 @@ Lidarr uses MusicBrainz (via `api.lidarr.audio`) for artist/album metadata. Howe
 ### Docker Compose (Recommended)
 
 ```yaml
-version: '3.8'
 services:
   lidarr-deemix:
     image: ghcr.io/riddix/lidarr-deemix:latest
     container_name: lidarr-deemix
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8080:8080"          # see the security note below
     environment:
       - DEEMIX_ARL=your_deezer_arl_token_here
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs
 ```
+
+> ⚠️ **Security note:** Port 8080 is an **anonymous HTTP forward proxy** (mitmproxy).
+> `--allow-hosts` only limits what gets MITM-intercepted — CONNECT tunnels to arbitrary
+> hosts are passed through. Never expose this port to the internet. If Lidarr runs on
+> the same host, bind to localhost (`"127.0.0.1:8080:8080"`) or use an internal Docker
+> network without publishing the port. Proxy authentication can be enabled via
+> `MITM_EXTRA_ARGS=--proxyauth user:pass`.
 
 ### Get your Deezer ARL Token
 
@@ -65,14 +71,16 @@ services:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DEEMIX_ARL` | - | **Required** for Deezer integration. Your Deezer ARL token |
-| `MITM_PORT` | `8080` | External proxy port (the port Lidarr connects to) |
+| `MITM_PORT` | `8080` | External proxy port. **Note:** if you change this, you must also adjust the container port mapping (e.g. `"9090:9090"`) |
 | `PRIO_DEEMIX` | `false` | Prioritize Deezer albums over MusicBrainz |
-| `OVERRIDE_MB` | `false` | Use Deezer data only (ignores MusicBrainz) |
+| `OVERRIDE_MB` | `false` | Use Deezer data only (ignores MusicBrainz; real MB artist IDs deliberately return 404) |
 | `PREFER_SPECIAL_EDITIONS` | `false` | Prefer Deluxe/Extended editions over standard albums |
+| `DEEMIX_MAX_ALBUMS` | `500` | Cap for Deezer album search results per artist refresh |
 | `DEEMIX_URL` | `http://127.0.0.1:7272` | Deemix server URL (only change for external Deemix instances) |
-| `LIDARR_URL` | - | Your Lidarr instance URL (for advanced features) |
-| `LIDARR_API_KEY` | - | Your Lidarr API key (for advanced features) |
+| `LIDARR_URL` | - | Your Lidarr instance URL (improves artist matching for Deezer albums) |
+| `LIDARR_API_KEY` | - | Your Lidarr API key (used together with `LIDARR_URL`) |
 | `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
+| `MITM_EXTRA_ARGS` | - | Extra arguments for mitmdump, e.g. `--proxyauth user:pass` |
 
 ### Lidarr Setup
 
@@ -141,7 +149,7 @@ environment:
 
 - **mitmproxy** — Only intercepts `api.lidarr.audio` and `ws.audioscrobbler.com`. All other traffic (indexers, download clients, notifications, Spotify) passes through as a clean TCP tunnel.
 - **Node.js** — Enhances metadata API responses with Deezer data, proxies audioscrobbler.
-- **Deemix** — Provides Deezer search, album/artist data, and download capabilities.
+- **Deezer API server** — Provides Deezer search and album/artist/track metadata via `deezer-py` (logged in with your ARL).
 
 ---
 

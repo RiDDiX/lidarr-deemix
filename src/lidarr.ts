@@ -1,46 +1,28 @@
 // lidarr.ts
-import { normalize } from "./helpers.js";
 
-const lidarrApiUrl = "https://api.lidarr.audio";
+const ARTIST_CACHE_TTL = 60_000;
 
-/**
- * Sucht einen einzelnen Künstler in Lidarr anhand des Namens.
- */
-export async function getLidarrArtist(name: string): Promise<any | null> {
-  try {
-    const res = await fetch(`${lidarrApiUrl}/api/v0.4/search?type=all&query=${encodeURIComponent(name)}`);
-    if (!res.ok) {
-      throw new Error(`HTTP error: ${res.status}`);
-    }
-    const jsonRaw: unknown = await res.json();
-    if (!Array.isArray(jsonRaw)) {
-      throw new Error("Erwartetes Array nicht erhalten");
-    }
-    const json = jsonRaw as any[];
-    const a = json.find(
-      (a) =>
-        a["album"] === null &&
-        a["artist"] &&
-        normalize(a["artist"]["artistname"]) === normalize(name)
-    );
-    return typeof a !== "undefined" ? a["artist"] : null;
-  } catch (error) {
-    console.error("Error fetching Lidarr artist:", error);
-    return null;
-  }
-}
+let artistCache: any[] | null = null;
+let artistCacheTime = 0;
 
 /**
- * Holt alle Künstler aus der Lidarr-Instanz.
+ * Fetches all artists from the Lidarr instance (60s cache - this is
+ * needed on every fake-album request).
  */
 export async function getAllLidarrArtists(): Promise<any[]> {
+  const baseUrl = process.env.LIDARR_URL;
+  const apiKey = process.env.LIDARR_API_KEY;
+  if (!baseUrl || !apiKey) {
+    return [];
+  }
+
+  const now = Date.now();
+  if (artistCache && now - artistCacheTime < ARTIST_CACHE_TTL) {
+    return artistCache;
+  }
+
   try {
-    const url = `${process.env.LIDARR_URL}/api/v1/artist`;
-    const apiKey = process.env.LIDARR_API_KEY as string;
-    if (!url || !apiKey) {
-      throw new Error("LIDARR_URL or LIDARR_API_KEY not defined");
-    }
-    const res = await fetch(url, {
+    const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/v1/artist`, {
       headers: { "X-Api-Key": apiKey },
     });
     if (!res.ok) {
@@ -48,9 +30,11 @@ export async function getAllLidarrArtists(): Promise<any[]> {
     }
     const jsonRaw: unknown = await res.json();
     if (!Array.isArray(jsonRaw)) {
-      throw new Error("Erwartetes Array nicht erhalten");
+      throw new Error("Expected an array response");
     }
-    return jsonRaw as any[];
+    artistCache = jsonRaw as any[];
+    artistCacheTime = now;
+    return artistCache;
   } catch (error) {
     console.error("Error fetching all Lidarr artists:", error);
     return [];

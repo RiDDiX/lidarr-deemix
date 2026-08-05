@@ -6,9 +6,6 @@
 
 export type DeemixEntityType = "artist" | "album" | "track" | "release" | "recording";
 
-// Prefix für Fake-IDs um Deezer von MusicBrainz zu unterscheiden
-export const DEEMIX_ID_PREFIX = "deemix-";
-
 // ============================================================================
 // Lidarr API Types - Search Response
 // ============================================================================

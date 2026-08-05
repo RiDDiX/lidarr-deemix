@@ -27,6 +27,13 @@ const fastify = Fastify({
   }
 });
 
+// Keep non-JSON bodies (e.g. application/x-www-form-urlencoded from
+// audioscrobbler clients) as raw buffers so they can be proxied untouched.
+// Without this parser Fastify rejects such requests with 415.
+fastify.addContentTypeParser('*', { parseAs: 'buffer' }, (_req, body, done) => {
+  done(null, body);
+});
+
 async function fetchFromLidarr(path: string): Promise<any> {
   const url = `${LIDARR_API_URL}${path}`;
   fastify.log.debug(`Fetching from Lidarr: ${url}`);
@@ -62,42 +69,50 @@ fastify.get('/health', async () => {
 });
 
 // Search endpoint - /api/v0.4/search
+// Lidarr uses three shapes here:
+//   type=all    -> manual "Add New" search, expects [{score?, artist, album}] wrappers
+//   type=artist -> automatic artist lookup (import lists), expects bare ArtistResource[]
+//   type=album  -> automatic album lookup, expects bare AlbumResource[] with artists+releases
 fastify.get('/api/:version/search', async (request, reply) => {
   const { version } = request.params as { version: string };
   const { type, query, term } = request.query as { type?: string; query?: string; term?: string };
   const searchTerm = query || term || '';
   const searchType = type || 'all';
-  
+
   fastify.log.info(`Search request: term="${searchTerm}" type="${searchType}"`);
-  
+
   try {
-    // Fetch from Lidarr API
+    // Fetch from Lidarr API, forwarding the original query string untouched so
+    // parameters like artist=... and includeTracks=1 are preserved
     let lidarrData: any[] = [];
     try {
-      // Note: URLSearchParams encodes spaces as '+', but Lidarr API expects '%20'
-      const encodedQuery = encodeURIComponent(searchTerm);
-      const data = await fetchFromLidarr(`/api/${version}/search?type=${searchType}&query=${encodedQuery}`);
+      const queryIndex = request.url.indexOf('?');
+      const queryString = queryIndex >= 0 ? request.url.slice(queryIndex) : '';
+      const data = await fetchFromLidarr(`/api/${version}/search${queryString}`);
       if (Array.isArray(data)) {
         lidarrData = data;
       }
     } catch (error) {
       fastify.log.warn({ err: error }, 'Failed to fetch from Lidarr API, using Deemix only');
     }
-    
-    // Log Lidarr data before enhancement
-    fastify.log.info(`Lidarr data received: ${lidarrData.length} results`);
-    
+
+    // Album searches must stay bare AlbumResource[]; injecting artist objects
+    // makes Lidarr's MapSearchResult throw and aborts the whole search
+    if (searchType === 'album') {
+      return lidarrData;
+    }
+
     // Enhance with Deemix results (if Deemix is available)
     let enhancedResults: any[];
     try {
-      enhancedResults = await search(lidarrData, searchTerm, true);
+      enhancedResults = await search(lidarrData, searchTerm, searchType === 'all');
     } catch (searchError) {
       fastify.log.warn({ err: searchError }, 'Deemix enhancement failed, returning Lidarr data only');
       enhancedResults = lidarrData;
     }
-    
+
     fastify.log.info(`Search results: ${lidarrData.length} from Lidarr, ${enhancedResults.length} total after enhancement`);
-    
+
     return enhancedResults;
   } catch (error) {
     fastify.log.error({ err: error }, 'Search failed completely');
@@ -131,7 +146,14 @@ fastify.get('/api/:version/artist/:artistId', async (request, reply) => {
     reply.code(404);
     return { error: 'Artist not found' };
   }
-  
+
+  // In override mode real MusicBrainz artists are deliberately 404'd so Lidarr
+  // only ever uses Deemix IDs (prevents mixed-ID duplicates; upstream behavior)
+  if (process.env.OVERRIDE_MB === 'true') {
+    reply.code(404);
+    return { error: 'Artist not found' };
+  }
+
   // Fetch from Lidarr and enhance with Deemix
   try {
     let artistData = await fetchFromLidarr(`/api/${version}/artist/${artistId}`);
@@ -227,16 +249,20 @@ fastify.all('/api/*', async (request, reply) => {
       headers['Content-Type'] = incomingCT;
     }
     
-    // Build fetch options - forward body for POST/PUT/PATCH
+    // Build fetch options - forward body for POST/PUT/PATCH.
+    // Non-JSON bodies arrive as raw Buffer (catch-all parser) and are
+    // forwarded untouched; parsed JSON is re-serialized.
     const fetchOpts: RequestInit = {
       method: request.method,
       headers,
     };
-    
+
     if (request.method !== 'GET' && request.method !== 'HEAD' && request.body) {
-      fetchOpts.body = typeof request.body === 'string'
+      fetchOpts.body = Buffer.isBuffer(request.body)
         ? request.body
-        : JSON.stringify(request.body);
+        : typeof request.body === 'string'
+          ? request.body
+          : JSON.stringify(request.body);
     }
     
     const response = await fetch(`${LIDARR_API_URL}${path}`, fetchOpts);
@@ -257,10 +283,12 @@ fastify.all('/api/*', async (request, reply) => {
   }
 });
 
-// Error handler
+// Error handler - preserve the original status code (415, 400, ...) so
+// client errors are not masked as generic 500s
 fastify.setErrorHandler(async (error, request, reply) => {
   fastify.log.error({ err: error }, 'Server error');
-  reply.code(500).send({ error: 'Internal server error', message: error.message });
+  const statusCode = error.statusCode && error.statusCode >= 400 ? error.statusCode : 500;
+  reply.code(statusCode).send({ error: 'Request failed', message: error.message });
 });
 
 // Start server

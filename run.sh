@@ -1,93 +1,122 @@
 #!/bin/bash
+# No -e on purpose: the monitor loop below has to survive service crashes.
+set -uo pipefail
 
-# Erstelle Log-Verzeichnis
 mkdir -p /app/logs
 
 echo "╔════════════════════════════════════════════════════╗"
-echo "║       Lidarr-Deemix v2.0 Container startet...      ║"
+echo "║        Lidarr-Deemix container starting...         ║"
 echo "╚════════════════════════════════════════════════════╝"
 echo ""
 
-# Prüfe ob ARL gesetzt ist
-if [ -z "$DEEMIX_ARL" ]; then
-    echo "⚠️  WARNUNG: DEEMIX_ARL nicht gesetzt!"
-    echo "   Deezer-Integration wird deaktiviert."
-    echo "   Nur MusicBrainz/Lidarr-Daten verfügbar."
-    echo ""
-    DEEMIX_ENABLED=false
-else
-    echo "✓ Deezer ARL Token gefunden"
-    DEEMIX_ENABLED=true
-fi
-
-# Setze Standard-Ports falls nicht definiert
+# Default ports
 export MITM_PORT=${MITM_PORT:-8080}
 export PROXY_PORT=${PROXY_PORT:-7171}
 export DEEMIX_PORT=${DEEMIX_PORT:-7272}
+DEEMIX_ARL=${DEEMIX_ARL:-}
+# Extra mitmdump arguments, e.g. '--proxyauth user:pass'
+MITM_EXTRA_ARGS=${MITM_EXTRA_ARGS:-}
 
-echo ""
-echo "Starte Services..."
-echo ""
+DEEMIX_PID=""
+NODE_PID=""
+MITM_PID=""
+DEEMIX_RESTARTS=0
+DEEMIX_NEXT_RESTART=0
 
-# Starte Deemix Server nur wenn ARL vorhanden
-if [ "$DEEMIX_ENABLED" = true ]; then
-    echo "→ Starte Deemix Server auf Port $DEEMIX_PORT..."
-    cd /app && python ./python/deemix-server.py > /app/logs/deemix.log 2>&1 &
+# Services log to file AND stdout (docker logs).
+# The 'exec' matters: without it $! would be the pid of the wrapper
+# subshell for the '&&' list, not the actual service, and cleanup()
+# would never reach the services.
+start_deemix() {
+    { cd /app && exec python ./python/deemix-server.py; } > >(tee -a /app/logs/deemix.log) 2>&1 &
     DEEMIX_PID=$!
-    sleep 3
-    
-    # Health Check für Deemix
-    if curl -sf http://127.0.0.1:$DEEMIX_PORT/health > /dev/null 2>&1; then
-        echo "  ✓ Deemix Server läuft"
-    else
-        echo "  ⚠️  Deemix Server konnte nicht starten (ARL ungültig?)"
-        DEEMIX_ENABLED=false
-    fi
+}
+
+start_node() {
+    { cd /app && exec node ./dist/index.js; } > >(tee -a /app/logs/proxy.log) 2>&1 &
+    NODE_PID=$!
+}
+
+start_mitm() {
+    # allow-hosts matches against "host:port" (e.g. api.lidarr.audio:443);
+    # everything else is passed through as a raw TCP tunnel.
+    # shellcheck disable=SC2086
+    { cd /app && exec mitmdump -s ./python/http-redirect-request.py \
+        --set stream_large_bodies=10m \
+        --listen-port "$MITM_PORT" \
+        --allow-hosts "^(api\.lidarr\.audio|ws\.audioscrobbler\.com)(:\\d+)?$" \
+        $MITM_EXTRA_ARGS; } > >(tee -a /app/logs/mitmdump.log) 2>&1 &
+    MITM_PID=$!
+}
+
+# --- Deemix (only with an ARL) ---
+if [ -z "$DEEMIX_ARL" ]; then
+    echo "⚠️  WARNING: DEEMIX_ARL is not set!"
+    echo "   Deezer integration disabled."
+    echo "   Only MusicBrainz/Lidarr data will be available."
+    echo ""
 else
-    DEEMIX_PID=""
+    echo "✓ Deezer ARL token found"
+    echo "→ Starting deemix server on port $DEEMIX_PORT..."
+    start_deemix
+
+    # The Deezer login can take a while - wait up to 60s for /health
+    DEEMIX_UP=false
+    for _ in $(seq 1 20); do
+        if ! kill -0 "$DEEMIX_PID" 2>/dev/null; then
+            break
+        fi
+        if curl -sf "http://127.0.0.1:$DEEMIX_PORT/health" > /dev/null 2>&1; then
+            DEEMIX_UP=true
+            break
+        fi
+        sleep 3
+    done
+    if [ "$DEEMIX_UP" = true ]; then
+        echo "  ✓ Deemix server is up"
+    else
+        echo "  ⚠️  Deemix server not ready (ARL invalid or expired?)"
+        echo "     The monitor keeps trying to restart it (see logs/deemix.log)."
+    fi
 fi
 
-echo "→ Starte NodeJS API Server auf Port $PROXY_PORT..."
-cd /app && node ./dist/index.js > /app/logs/proxy.log 2>&1 &
-NODE_PID=$!
+# --- Node API server ---
+echo "→ Starting NodeJS API server on port $PROXY_PORT..."
+start_node
 sleep 2
 
-# Health Check für Node
-if curl -sf http://127.0.0.1:$PROXY_PORT/health > /dev/null 2>&1; then
-    echo "  ✓ NodeJS API Server läuft"
+if curl -sf "http://127.0.0.1:$PROXY_PORT/health" > /dev/null 2>&1; then
+    echo "  ✓ NodeJS API server is up"
 else
-    echo "  ✗ NodeJS API Server konnte nicht starten!"
-    cat /app/logs/proxy.log
+    echo "  ✗ NodeJS API server failed to start!"
     exit 1
 fi
 
-echo "→ Starte mitmproxy auf Port $MITM_PORT..."
-cd /app && mitmdump -s ./python/http-redirect-request.py --set stream_large_bodies=1 --listen-port $MITM_PORT --allow-hosts "^(api\.lidarr\.audio|ws\.audioscrobbler\.com)(:\\d+)?$" > /app/logs/mitmdump.log 2>&1 &
-MITM_PID=$!
+# --- mitmproxy ---
+echo "→ Starting mitmproxy on port $MITM_PORT..."
+start_mitm
 sleep 2
 
-# Health Check für mitmproxy (prüfe ob Prozess läuft)
-if kill -0 $MITM_PID 2>/dev/null; then
-    echo "  ✓ mitmproxy läuft"
+if kill -0 "$MITM_PID" 2>/dev/null; then
+    echo "  ✓ mitmproxy is up"
 else
-    echo "  ✗ mitmproxy konnte nicht starten!"
-    cat /app/logs/mitmdump.log
+    echo "  ✗ mitmproxy failed to start!"
     exit 1
 fi
 
 echo ""
 echo "╔════════════════════════════════════════════════════╗"
-echo "║            Alle Services gestartet!                ║"
+echo "║             All services started!                  ║"
 echo "╠════════════════════════════════════════════════════╣"
-echo "║  Proxy Port:     $MITM_PORT (extern)                "
-echo "║  API Port:       $PROXY_PORT (intern)               "
-if [ "$DEEMIX_ENABLED" = true ]; then
-echo "║  Deemix Port:    $DEEMIX_PORT (aktiv)               "
+echo "║  Proxy port:     $MITM_PORT (external)              "
+echo "║  API port:       $PROXY_PORT (internal)             "
+if [ -n "$DEEMIX_ARL" ]; then
+echo "║  Deemix port:    $DEEMIX_PORT (active)              "
 else
-echo "║  Deemix Port:    $DEEMIX_PORT (deaktiviert)         "
+echo "║  Deemix port:    $DEEMIX_PORT (disabled)            "
 fi
 echo "║                                                    ║"
-echo "║  Konfiguriere Lidarr:                              ║"
+echo "║  Configure Lidarr:                                 ║"
 echo "║  → Settings → General → Use Proxy: ✓              ║"
 echo "║  → Proxy Type: HTTP(S)                            ║"
 echo "║  → Hostname: <container-ip>                       ║"
@@ -96,45 +125,55 @@ echo "║  → Certificate Validation: Disabled               ║"
 echo "╚════════════════════════════════════════════════════╝"
 echo ""
 
-# Funktion für sauberes Beenden
+# Graceful shutdown
 cleanup() {
     echo ""
-    echo "Fahre Services herunter..."
-    [ -n "$DEEMIX_PID" ] && kill $DEEMIX_PID 2>/dev/null
-    [ -n "$NODE_PID" ] && kill $NODE_PID 2>/dev/null
-    [ -n "$MITM_PID" ] && kill $MITM_PID 2>/dev/null
+    echo "Shutting down services..."
+    [ -n "$DEEMIX_PID" ] && kill "$DEEMIX_PID" 2>/dev/null
+    [ -n "$NODE_PID" ] && kill "$NODE_PID" 2>/dev/null
+    [ -n "$MITM_PID" ] && kill "$MITM_PID" 2>/dev/null
     wait $DEEMIX_PID $NODE_PID $MITM_PID 2>/dev/null
-    echo "Alle Services beendet."
+    echo "All services stopped."
     exit 0
 }
 
-# Signal-Handler registrieren
 trap cleanup SIGTERM SIGINT
 
-# Überwache die Prozesse
+# Watch the processes
 while true; do
-    # Prüfe mitmproxy
-    if ! kill -0 $MITM_PID 2>/dev/null; then
-        echo "[$(date)] WARNUNG: mitmproxy abgestürzt! Neustart..."
-        cd /app && mitmdump -s ./python/http-redirect-request.py --set stream_large_bodies=1 --listen-port $MITM_PORT --allow-hosts "^(api\.lidarr\.audio|ws\.audioscrobbler\.com)(:\\d+)?$" >> /app/logs/mitmdump.log 2>&1 &
-        MITM_PID=$!
+    if ! kill -0 "$MITM_PID" 2>/dev/null; then
+        echo "[$(date)] WARNING: mitmproxy crashed! Restarting..."
+        start_mitm
     fi
-    
-    # Prüfe Node Proxy
-    if ! kill -0 $NODE_PID 2>/dev/null; then
-        echo "[$(date)] WARNUNG: NodeJS API Server abgestürzt! Neustart..."
-        cd /app && node ./dist/index.js >> /app/logs/proxy.log 2>&1 &
-        NODE_PID=$!
+
+    if ! kill -0 "$NODE_PID" 2>/dev/null; then
+        echo "[$(date)] WARNING: NodeJS API server crashed! Restarting..."
+        start_node
     fi
-    
-    # Prüfe Deemix Server (nur wenn aktiviert)
-    if [ "$DEEMIX_ENABLED" = true ] && [ -n "$DEEMIX_PID" ]; then
-        if ! kill -0 $DEEMIX_PID 2>/dev/null; then
-            echo "[$(date)] WARNUNG: Deemix Server abgestürzt! Neustart..."
-            cd /app && python ./python/deemix-server.py >> /app/logs/deemix.log 2>&1 &
-            DEEMIX_PID=$!
+
+    # The deemix server is always watched while an ARL is set, no matter
+    # how the initial startup health check went. Crash-looping (e.g. bad
+    # ARL or a network outage) backs off up to 5 minutes but never gives
+    # up for good - a transient outage should not disable Deezer forever.
+    if [ -n "$DEEMIX_ARL" ] && [ -n "$DEEMIX_PID" ]; then
+        if ! kill -0 "$DEEMIX_PID" 2>/dev/null; then
+            NOW=$(date +%s)
+            if [ "$NOW" -ge "$DEEMIX_NEXT_RESTART" ]; then
+                DEEMIX_RESTARTS=$((DEEMIX_RESTARTS + 1))
+                BACKOFF=$((10 * DEEMIX_RESTARTS * DEEMIX_RESTARTS))
+                [ "$BACKOFF" -gt 300 ] && BACKOFF=300
+                echo "[$(date)] WARNING: deemix server crashed! Restarting (attempt $DEEMIX_RESTARTS, next retry in ${BACKOFF}s if it keeps crashing - check your ARL)..."
+                start_deemix
+                DEEMIX_NEXT_RESTART=$((NOW + BACKOFF))
+            fi
+        else
+            DEEMIX_RESTARTS=0
+            DEEMIX_NEXT_RESTART=0
         fi
     fi
-    
-    sleep 10
+
+    # sleep in the background so SIGTERM is handled immediately instead
+    # of after up to 10s (docker stop only grants a 10s grace period)
+    sleep 10 &
+    wait $!
 done

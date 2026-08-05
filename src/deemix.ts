@@ -1,17 +1,7 @@
 import _ from "lodash";
 import { getAllLidarrArtists } from "./lidarr.js";
-import { titleCase, normalize, deduplicateAlbums } from "./helpers.js";
-import type {
-  DeemixEntityType,
-  LidarrArtist,
-  LidarrAlbumBasic,
-  LidarrAlbumFull,
-  LidarrSearchResult,
-  DeezerArtist,
-  DeezerAlbum,
-  DeezerTrack,
-  DeezerArtistFull,
-} from "./types.js";
+import { normalize, deduplicateAlbums } from "./helpers.js";
+import type { DeemixEntityType } from "./types.js";
 
 const DEEMIX_URL = process.env.DEEMIX_URL || "http://127.0.0.1:7272";
 const FETCH_TIMEOUT = 10000;
@@ -26,6 +16,10 @@ const TYPE_PREFIX: Record<DeemixEntityType, string> = {
 
 export function fakeId(id: string | number, type: DeemixEntityType): string {
   const prefix = TYPE_PREFIX[type];
+  if (String(id).length > 12) {
+    // more than 12 digits breaks the UUID format (Guid.TryParse in Lidarr fails)
+    console.warn(`Deezer id ${id} has more than 12 digits - fake UUID will not be GUID-shaped`);
+  }
   const idStr = String(id).padStart(12, prefix);
   return `${prefix.repeat(8)}-${prefix.repeat(4)}-${prefix.repeat(4)}-${prefix.repeat(4)}-${idStr}`;
 }
@@ -40,7 +34,9 @@ export function isFakeId(id: string | undefined | null, type: DeemixEntityType):
 export function decodeFakeId(id: string | undefined | null, type: DeemixEntityType): string | null {
   if (!id || !isFakeId(id, type)) return null;
   const prefix = TYPE_PREFIX[type];
-  const suffix = id.slice(-12);
+  // take the last UUID segment instead of slice(-12) so ids with more
+  // than 12 digits still decode correctly
+  const suffix = id.split("-").pop() || "";
   return suffix.replace(new RegExp(`^${prefix}+`), "") || null;
 }
 
@@ -57,7 +53,7 @@ async function fetchWithTimeout(url: string, timeout = FETCH_TIMEOUT): Promise<R
 
 async function searchDeemixArtists(name: string): Promise<any[]> {
   try {
-    const data = await fetch(
+    const data = await fetchWithTimeout(
       `${DEEMIX_URL}/search/artists?limit=100&offset=0&q=${encodeURIComponent(name)}`
     );
     if (!data.ok) {
@@ -74,7 +70,7 @@ async function searchDeemixArtists(name: string): Promise<any[]> {
 
 export async function deemixAlbum(id: string): Promise<any> {
   try {
-    const data = await fetch(`${DEEMIX_URL}/albums/${id}`);
+    const data = await fetchWithTimeout(`${DEEMIX_URL}/albums/${id}`);
     if (!data.ok) {
       console.error(`Deemix album fetch failed: ${data.status}`);
       return null;
@@ -87,41 +83,45 @@ export async function deemixAlbum(id: string): Promise<any> {
   }
 }
 
-export async function deemixTracks(id: string): Promise<any> {
+// Returns null on failure (network, HTTP error, bad payload) so callers can
+// tell "no tracks" apart from "tracks unavailable right now"
+export async function deemixTracks(id: string): Promise<any[] | null> {
   try {
-    const data = await fetch(`${DEEMIX_URL}/album/${id}/tracks`);
+    const data = await fetchWithTimeout(`${DEEMIX_URL}/album/${id}/tracks`);
     if (!data.ok) {
       console.error(`Deemix tracks fetch failed: ${data.status}`);
-      return { data: [] };
+      return null;
     }
     const j = (await data.json()) as any;
-    return j.data as [];
+    return Array.isArray(j?.data) ? j.data : null;
   } catch (error) {
     console.error("Error fetching Deemix tracks:", error);
-    return [];
+    return null;
   }
 }
 
 export async function deemixArtist(id: string): Promise<any> {
   try {
-    const data = await fetch(`${DEEMIX_URL}/artists/${id}`);
+    const data = await fetchWithTimeout(`${DEEMIX_URL}/artists/${id}`);
     if (!data.ok) {
       console.error(`Deemix artist fetch failed: ${data.status}`);
       return null;
     }
     const j = (await data.json()) as any;
 
+    const artistAlbums: any[] = Array.isArray(j?.["albums"]?.["data"])
+      ? j["albums"]["data"]
+      : [];
+
     return {
       Albums: [
-        ...j["albums"]["data"].map((a: any) => ({
+        ...artistAlbums.map((a: any) => ({
           Id: fakeId(a["id"], "album"),
           OldIds: [],
           ReleaseStatuses: ["Official"],
-          SecondaryTypes: a["title"].toLowerCase().includes("live")
-            ? ["Live"]
-            : [],
+          SecondaryTypes: getSecondaryTypes(a["title"], a["record_type"]),
           Title: a["title"],
-          Type: getType(a["record_type"]),
+          Type: mapRecordType(a["record_type"]).type,
         })),
       ],
       artistaliases: [],
@@ -149,11 +149,17 @@ export async function deemixArtist(id: string): Promise<any> {
   }
 }
 
+// Deezer's account for compilations ("Various Artists" / "Verschillende artiesten" /
+// "Verschiedene Interpreten" - the name is locale-dependent, the id is not)
+const DEEZER_VARIOUS_ARTISTS_ID = 5080;
+
 async function deemixAlbums(name: string): Promise<any[]> {
   try {
     let total = 0;
     let start = 0;
-    const data = await fetch(
+    const parsedMax = parseInt(process.env.DEEMIX_MAX_ALBUMS || "500");
+    const maxAlbums = Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : 500;
+    const data = await fetchWithTimeout(
       `${DEEMIX_URL}/search/albums?limit=1&offset=0&q=${encodeURIComponent(name)}`
     );
 
@@ -163,11 +169,11 @@ async function deemixAlbums(name: string): Promise<any[]> {
     }
 
     const j = (await data.json()) as any;
-    total = j["total"] as number;
+    total = Math.min((j["total"] as number) || 0, maxAlbums);
 
     const albums: any[] = [];
     while (start < total) {
-      const data = await fetch(
+      const data = await fetchWithTimeout(
         `${DEEMIX_URL}/search/albums?limit=100&offset=${start}&q=${encodeURIComponent(name)}`
       );
       if (!data.ok) {
@@ -175,14 +181,16 @@ async function deemixAlbums(name: string): Promise<any[]> {
         break;
       }
       const j = (await data.json()) as any;
-      albums.push(...(j["data"] as []));
+      const batch = Array.isArray(j?.data) ? j.data : [];
+      if (batch.length === 0) break;
+      albums.push(...batch);
       start += 100;
     }
 
     return albums.filter(
       (a) =>
-        normalize(a["artist"]["name"]) === normalize(name) ||
-        a["artist"]["name"] === "Verschillende artiesten"
+        normalize(a?.["artist"]?.["name"] || "") === normalize(name) ||
+        a?.["artist"]?.["id"] === DEEZER_VARIOUS_ARTISTS_ID
     );
   } catch (error) {
     console.error("Error fetching Deemix albums:", error);
@@ -190,13 +198,31 @@ async function deemixAlbums(name: string): Promise<any[]> {
   }
 }
 
-function getType(rc: string) {
-  let type = rc.charAt(0).toUpperCase() + rc.slice(1);
-
-  if (type === "Ep") {
-    type = "EP";
+// Lidarr's FilterAlbums only accepts the primary types Album/EP/Single/Broadcast/Other;
+// anything else (e.g. Deezer's "compile") gets silently dropped from artist responses.
+function mapRecordType(rc: string): { type: string; secondary: string[] } {
+  switch ((rc || "").toLowerCase()) {
+    case "album":
+      return { type: "Album", secondary: [] };
+    case "ep":
+      return { type: "EP", secondary: [] };
+    case "single":
+      return { type: "Single", secondary: [] };
+    case "compile":
+    case "compilation":
+      return { type: "Album", secondary: ["Compilation"] };
+    default:
+      return { type: "Other", secondary: [] };
   }
-  return type;
+}
+
+function getSecondaryTypes(title: string, recordType: string): string[] {
+  const secondary = [...mapRecordType(recordType).secondary];
+  // Word boundary avoids false positives like "Oliver" or "Deliverance"
+  if (/\blive\b/i.test(title || "")) {
+    secondary.push("Live");
+  }
+  return secondary;
 }
 
 export async function getAlbum(id: string) {
@@ -323,6 +349,12 @@ export async function getAlbum(id: string) {
     }
 
     const tracks = await deemixTracks(d["id"]);
+    if (tracks === null) {
+      // Fail the whole album fetch instead of answering with an empty track
+      // list - a 0-track 200 would make Lidarr wipe existing tracks on refresh
+      console.error(`Tracks for album ${d["id"]} unavailable, failing the album fetch`);
+      return null;
+    }
     return {
       aliases: [],
       artistid: lidarr2["id"],
@@ -350,18 +382,18 @@ export async function getAlbum(id: string) {
           oldids: [],
           releasedate: d["release_date"],
           status: "Official",
-          title: titleCase(d["title"]),
-          track_count: d["nb_tracks"],
+          title: d["title"],
           tracks: tracks.map((t: any, idx: number) => ({
-            // KRITISCH: PascalCase für Lidarr!
+            // PascalCase - that's what Lidarr expects here
             Id: `${fakeId(t["id"], "track")}`,
-            ArtistCredit: [], // MUSS PascalCase sein!
+            ArtistCredit: [],
             Title: t["title"],
-            TrackPosition: t["track_number"] || idx + 1,
+            // Deezer's album-tracks payload uses track_position (not track_number)
+            TrackPosition: t["track_position"] ?? idx + 1,
             MediumNumber: t["disk_number"] || 1,
             Duration: t["duration"] * 1000,
             RecordingId: fakeId(t["id"], "recording"),
-            // Legacy-Felder für Kompatibilität
+            // legacy lowercase fields for compatibility
             artistid: lidarr2["id"],
             durationms: t["duration"] * 1000,
             id: `${fakeId(t["id"], "track")}`,
@@ -370,14 +402,14 @@ export async function getAlbum(id: string) {
             oldrecordingids: [],
             recordingid: fakeId(t["id"], "recording"),
             trackname: t["title"],
-            tracknumber: `${t["track_number"] || idx + 1}`,
-            trackposition: t["track_number"] || idx + 1,
+            tracknumber: `${t["track_position"] ?? idx + 1}`,
+            trackposition: t["track_position"] ?? idx + 1,
           })),
         },
       ],
-      secondarytypes: d["title"].toLowerCase().includes("live") ? ["Live"] : [],
-      title: titleCase(d["title"]),
-      type: getType(d["record_type"]),
+      secondarytypes: getSecondaryTypes(d["title"], d["record_type"]),
+      title: d["title"],
+      type: mapRecordType(d["record_type"]).type,
     };
   } catch (error) {
     console.error("Error getting album:", error);
@@ -389,17 +421,16 @@ export async function getAlbums(name: string) {
   try {
     const dalbums = await deemixAlbums(name);
 
-    // Intelligente Deduplizierung: Wählt das "beste" Album bei Duplikaten
+    // smart dedupe: picks the "best" album when there are duplicates
     const dedupedAlbums = deduplicateAlbums(dalbums);
 
     const dtoRalbums = dedupedAlbums.map((d) => ({
       Id: `${fakeId(d["id"], "album")}`,
       OldIds: [],
       ReleaseStatuses: ["Official"],
-      SecondaryTypes: d["title"].toLowerCase().includes("live") ? ["Live"] : [],
-      Title: titleCase(d["title"]),
-      LowerTitle: d["title"].toLowerCase(),
-      Type: getType(d["record_type"]),
+      SecondaryTypes: getSecondaryTypes(d["title"], d["record_type"]),
+      Title: d["title"],
+      Type: mapRecordType(d["record_type"]).type,
     }));
 
     return dtoRalbums;
@@ -451,6 +482,7 @@ export async function search(
         }
       }
       if (dartist) {
+        lartist["artist"]["images"] = lartist["artist"]["images"] || [];
         let posterFound = false;
         for (const img of lartist["artist"]["images"] as any[]) {
           if (img["CoverType"] === "Poster") {
@@ -464,6 +496,7 @@ export async function search(
             Url: dartist["picture_xl"],
           });
         }
+        lartist["artist"]["oldids"] = lartist["artist"]["oldids"] || [];
         lartist["artist"]["oldids"].push(fakeId(dartist["id"], "artist"));
       }
 
@@ -494,19 +527,21 @@ export async function search(
           },
         ],
         type:
-          (d["type"] as string).charAt(0).toUpperCase() +
-          (d["type"] as string).slice(1),
+          ((d["type"] as string) || "artist").charAt(0).toUpperCase() +
+          ((d["type"] as string) || "artist").slice(1),
       },
       album: null,
     }));
 
+    // query is already decoded by Fastify - decoding again would throw
+    // URIError on literal '%' in search terms
     if (lidarr.length === 0) {
       const sorted = [];
 
       for (const a of dtolartists) {
         if (
-          a.artist.artistname === decodeURIComponent(query) ||
-          normalize(a.artist.artistname) === normalize(decodeURIComponent(query))
+          a.artist.artistname === query ||
+          normalize(a.artist.artistname) === normalize(query)
         ) {
           sorted.unshift(a);
         } else {
@@ -519,14 +554,13 @@ export async function search(
     if (!isManual) {
       dtolartists = dtolartists.map((a) => a.artist);
       if (process.env.OVERRIDE_MB === "true") {
-        dtolartists = [
-          dtolartists.filter((a) => {
-            return (
-              a["artistname"] === decodeURIComponent(query) ||
-              normalize(a["artistname"]) === normalize(decodeURIComponent(query))
-            );
-          })[0],
-        ];
+        const exact = dtolartists.filter((a) => {
+          return (
+            a["artistname"] === query ||
+            normalize(a["artistname"]) === normalize(query)
+          );
+        });
+        dtolartists = exact.length > 0 ? [exact[0]] : [];
       }
     }
 

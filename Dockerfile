@@ -1,23 +1,20 @@
 # =============================================================================
-#  Lidarr-Deemix v2.0 - Multi-Stage Docker Build
+#  Lidarr-Deemix - Multi-Stage Docker Build
 # =============================================================================
+# Base image pinned to the Alpine release on purpose: this also pins the
+# apk mitmproxy version in the runtime stage (Alpine 3.24 -> mitmproxy 11.0.x).
 
 # =================
 #  Stage 1: Builder
 # =================
-FROM python:3.12-alpine AS builder
+FROM python:3.12-alpine3.24 AS builder
 
 WORKDIR /app
 
-# Build dependencies
+# Build dependencies (all Python deps are pure-python wheels)
 RUN apk add --no-cache \
-    bash \
-    build-base \
-    curl \
-    libffi-dev \
     nodejs \
-    npm \
-    openssl-dev
+    npm
 
 # --- Python dependencies ---
 COPY python/requirements.txt ./python/requirements.txt
@@ -36,9 +33,9 @@ RUN npm run build && npm prune --omit=dev
 # =================
 #  Stage 2: Runtime
 # =================
-FROM python:3.12-alpine
+FROM python:3.12-alpine3.24
 
-ARG VERSION=2.2.0
+ARG VERSION=2.3.0
 
 LABEL org.opencontainers.image.title="Lidarr-Deemix"
 LABEL org.opencontainers.image.description="Enrich Lidarr with Deezer metadata via proxy"
@@ -47,7 +44,7 @@ LABEL org.opencontainers.image.source="https://github.com/RiDDiX/lidarr-deemix"
 
 WORKDIR /app
 
-# Runtime dependencies only
+# Runtime dependencies only (mitmproxy runs on Alpine's system python)
 RUN apk add --no-cache \
     bash \
     curl \
@@ -74,7 +71,7 @@ COPY run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 
 # Create directories
-RUN mkdir -p /app/logs /app/config /app/downloads
+RUN mkdir -p /app/logs /app/config
 
 # Environment defaults
 ENV MITM_PORT=8080 \
@@ -87,9 +84,9 @@ ENV MITM_PORT=8080 \
 # Expose proxy port (mitmproxy)
 EXPOSE 8080
 
-# Health check (check NodeJS API server)
+# Health check (check NodeJS API server; follows PROXY_PORT overrides)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -sf http://localhost:7171/health || exit 1
+    CMD curl -sf "http://localhost:${PROXY_PORT:-7171}/health" || exit 1
 
 # Start application
 CMD ["/app/run.sh"]

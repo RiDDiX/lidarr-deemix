@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-08-05
+
+### 🩹 Search Fixes, Hardening & Big Cleanup
+
+Went through the whole proxy chain (Lidarr → mitmproxy → Node → Deezer) and fixed everything that didn't match what Lidarr actually expects. Long list, sorry.
+
+#### Fixed
+- **Automatic searches**: `search?type=artist` (import lists, automatic artist mapping) got wrapper objects instead of plain artist resources - Lidarr couldn't do anything with those. Now returns the correct format; `type=all` (the manual "Add New" search) keeps the wrappers like before.
+- **Album search**: Deezer artists were mixed into `type=album` results, which can abort the whole search in Lidarr. Album searches are now passed through untouched - including the `artist=` and `includeTracks=1` parameters that were previously dropped on the way to the metadata API.
+- **Compilations**: Deezer's `record_type` "compile" was mapped to the invalid type "Compile", so Lidarr silently filtered those albums out. They're now `Album` with secondary type `Compilation` (enable "Compilation" in your metadata profile if you want to see them).
+- **Multi-disc albums**: track numbers were read from a field that doesn't exist in the Deezer payload (`track_number` instead of `track_position`), so disc 2 kept counting at 13 instead of starting at 1.
+- **Album fetch**: an HTTP error while fetching tracks crashed the album mapping half-way. It now fails cleanly, so Lidarr keeps its existing data and retries later instead of persisting an album with an empty track list.
+- **Album titles**: no more forced title-casing ("IGOR" became "Igor", "OK Computer" became "Ok Computer"). Original Deezer titles are kept as-is.
+- **Dedupe**: "(Live)", "(Vol. 2)" and similar albums were merged into the main album because bracket content was always stripped. Brackets are now only stripped when they contain an edition suffix (Deluxe, Remastered, ...).
+- **"Live" detection**: matched on substring, so "Oliver" or "Deliverance" got tagged as live albums. Now matches whole words only.
+- **Deemix server**: the error handler caught a `LoginError` that doesn't exist in deezer-py, so any real error ended up as a masked AttributeError and the ARL re-login never ran. Now catches `DeezerError`, re-logins once and retries.
+- **docker-compose healthcheck**: probed the mitmproxy port (8080), which has no `/health` route - the container was permanently "unhealthy". Now probes the API server on 7171.
+- `npm run dev` works again (`tsc-watch` was missing from the dependencies).
+
+#### Changed
+- All Deezer requests have a 10s timeout now. A hung deemix server used to block artist refreshes forever.
+- Album search pagination is capped (default 500, configurable via `DEEMIX_MAX_ALBUMS`) - generic artist names like "Muse" no longer trigger dozens of sequential requests per refresh.
+- Various-Artists compilations are matched via Deezer's account ID instead of the hardcoded Dutch name "Verschillende artiesten".
+- `run.sh` rewritten: waits up to 60s for the Deezer login (was a single check after 3s), keeps monitoring and restarting the deemix server as long as an ARL is set, and mirrors all service logs to stdout so `docker logs` actually shows something. New: `MITM_EXTRA_ARGS` (e.g. `--proxyauth user:pass`).
+- Deemix `/health` no longer fires a live Deezer API call on every probe. `/health/deep` still does, for manual checks.
+- Scrobbler proxy: no more stale `content-encoding`/`content-length` headers, and form-encoded POSTs are forwarded raw instead of failing with 415/500.
+- Error responses keep their real status code instead of turning everything into a 500.
+- Python stack: dropped the pip mitmproxy - it was pinned to 10.2.4 but never used at runtime (the container runs the apk package anyway, the pip install just bloated the image). Base image pinned to `python:3.12-alpine3.24`, Flask 2.2.5 → 3.1 (2.2 is EOL), waitress 3.0.0 → 3.0.2 (two known DoS CVEs).
+
+#### Removed
+- The `/download` endpoint and the `deemix` pip package. Nothing called that endpoint, it blocked the server while "downloading" and always returned `null`. ARL login and all Deezer searching are untouched - that runs via `deezer-py`, which stays.
+- Dead code all over the place, the stale `pnpm-lock.yaml` and a broken tsconfig.
+
+#### Heads up
+- `OVERRIDE_MB=true` returns 404 for real MusicBrainz artist IDs again. That's intentional - it prevents mixed MB/Deezer IDs in override mode.
+- New albums can show up on the next refresh (compilations, previously-merged "(Live)" editions). With "Monitor: All" artists they may get auto-monitored.
+- Album titles switch to their original Deezer spelling on refresh (cosmetic, matching runs on IDs).
+- Port 8080 is an anonymous forward proxy - don't expose it to the internet. See the security note in the README.
+
+---
+
 ## [2.2.0] - 2026-02-18
 
 ### 🔧 Proxy & Indexer Fix
@@ -80,7 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Removed
 - `http-proxy-middleware` dependency
 - `node-fetch` dependency (using native fetch)
-- mitmproxy requirement (simplified architecture)
+- ~~mitmproxy requirement (simplified architecture)~~ (reverted shortly after - HTTPS proxy tunneling needs mitmproxy, it's been a core component ever since)
 
 ### Migration from v1.x
 

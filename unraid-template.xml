@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/RiDDiX/lidarr-deemix/discussions</Support>
   <Project/>
-  <Overview/>
+  <Overview>Enriches Lidarr with Deezer metadata. Configure Lidarr to use this container as HTTP(S) proxy (Settings - General). WARNING: the proxy port is an anonymous forward proxy - do not expose it to the internet.</Overview>
   <Category/>
   <WebUI/>
   <TemplateURL>https://github.com/RiDDiX/lidarr-deemix/blob/main/unraid-template.xml</TemplateURL>
@@ -21,11 +21,14 @@
   <DonateLink/>
   <Requires/>
   <Config Name="Proxy" Target="8080" Default="" Mode="tcp" Description="Port for Proxy" Type="Port" Display="always" Required="true" Mask="false">16080</Config>
-  <Config Name="DEEMIX_ARL" Target="DEEMIX_ARL" Default="" Mode="" Description="Your Deezer ARL Token to obtain Artits / Albums" Type="Variable" Display="always" Required="true" Mask="false"></Config>
-  <Config Name="OVERRIDE_MB" Target="OVERRIDE_MB" Default="false" Mode="" Description="Only use Deezer Artists / Albums instead of MusicBrainz" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
-  <Config Name="PRIO_DEEMIX" Target="PRIO_DEEMIX" Default="" Mode="" Description="" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
-  <Config Name="LIDARR_URL" Target="LIDARR_URL" Default="" Mode="" Description="Your Lidarr Instance URL" Type="Variable" Display="always" Required="false" Mask="false"></Config>
-  <Config Name="LIDARR_API_KEY" Target="LIDARR_API_KEY" Default="" Mode="" Description="Your Lidarr Instance API Key" Type="Variable" Display="always" Required="true" Mask="false"></Config>
-  <Config Name="FALLBACK_DEEZER" Target="FALLBACK_DEEZER" Default="" Mode="" Description="If Deezer should used as Fallback instead of force using Deezer-IDs" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="DEEMIX_ARL" Target="DEEMIX_ARL" Default="" Mode="" Description="Your Deezer ARL token to fetch artists/albums from Deezer. Without it, the container works as a plain MusicBrainz proxy." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="OVERRIDE_MB" Target="OVERRIDE_MB" Default="false" Mode="" Description="Only use Deezer artists/albums instead of MusicBrainz (WARNING: removes MB-imported artists)" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="PRIO_DEEMIX" Target="PRIO_DEEMIX" Default="false" Mode="" Description="Prefer Deezer albums over MusicBrainz albums when both exist" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="PREFER_SPECIAL_EDITIONS" Target="PREFER_SPECIAL_EDITIONS" Default="false" Mode="" Description="Prefer Deluxe/Extended editions over standard albums during deduplication" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="LIDARR_URL" Target="LIDARR_URL" Default="" Mode="" Description="Your Lidarr instance URL (optional, improves artist matching for Deezer albums)" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="LIDARR_API_KEY" Target="LIDARR_API_KEY" Default="" Mode="" Description="Your Lidarr instance API key (optional, used together with LIDARR_URL)" Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="LOG_LEVEL" Target="LOG_LEVEL" Default="info" Mode="" Description="Logging level (debug, info, warn, error)" Type="Variable" Display="advanced" Required="false" Mask="false">info</Config>
+  <Config Name="DEEMIX_MAX_ALBUMS" Target="DEEMIX_MAX_ALBUMS" Default="500" Mode="" Description="Maximum Deezer album search results fetched per artist refresh" Type="Variable" Display="advanced" Required="false" Mask="false">500</Config>
+  <Config Name="MITM_EXTRA_ARGS" Target="MITM_EXTRA_ARGS" Default="" Mode="" Description="Extra mitmdump arguments, e.g. --proxyauth user:pass to lock down the proxy port" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <TailscaleStateDir/>
 </Container>
