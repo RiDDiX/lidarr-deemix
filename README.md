@@ -7,6 +7,10 @@
 [![Version](https://img.shields.io/github/v/release/RiDDiX/lidarr-deemix?style=flat)](https://github.com/RiDDiX/lidarr-deemix/releases)
 [![Container Image](https://img.shields.io/badge/ghcr.io-riddix%2Flidarr--deemix-blue?logo=docker&style=flat)](https://github.com/RiDDiX/lidarr-deemix/pkgs/container/lidarr-deemix)
 
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&style=flat)](https://github.com/sponsors/RiDDiX)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-ff5e5b?logo=ko-fi&logoColor=white&style=flat)](https://ko-fi.com/riddix)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-003087?logo=paypal&style=flat)](https://www.paypal.me/RiDDiX93)
+
 </div>
 
 ---
