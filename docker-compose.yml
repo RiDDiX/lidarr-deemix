@@ -58,17 +58,13 @@ services:
       - MITM_EXTRA_ARGS=${MITM_EXTRA_ARGS:-}
 
     volumes:
-      - ./config:/app/config
       - ./logs:/app/logs
 
-    healthcheck:
-      # 7171 is the internal API server; 8080 is the mitmproxy port
-      # and does not answer direct HTTP requests
-      test: ["CMD-SHELL", "curl -sf http://localhost:$${PROXY_PORT:-7171}/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 # ===========================================
 # Example: Full stack with Lidarr

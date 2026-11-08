@@ -28,14 +28,18 @@ INTERCEPTED_HOSTS = {
 }
 
 PROXY_HOST = os.environ.get("PROXY_HOST", "127.0.0.1")
+_proxy_port = os.environ.get("PROXY_PORT", "7171")
 try:
-    PROXY_PORT = int(os.environ.get("PROXY_PORT", "7171"))
+    PROXY_PORT = int(_proxy_port)
+    if not 1 <= PROXY_PORT <= 65535:
+        raise ValueError
 except ValueError:
+    logger.warning(f"Invalid PROXY_PORT {_proxy_port!r}, falling back to 7171")
     PROXY_PORT = 7171
 
 
 def request(flow: http.HTTPFlow) -> None:
-    host = flow.request.pretty_host
+    host = flow.request.pretty_host.lower().rstrip('.')
 
     # Only intercept specific hosts - everything else passes through unchanged
     if host not in INTERCEPTED_HOSTS:

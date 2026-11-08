@@ -23,10 +23,12 @@ jobs:
 
       - name: Extract changelog for this version
         id: changelog
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
           # Extract the section for the current version from CHANGELOG.md
-          VERSION="${{ steps.version.outputs.VERSION }}"
-          CHANGELOG=$(awk "/^## \[${VERSION}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md)
+          VERSION_RE=$(printf '%s' "$VERSION" | sed 's/\./\\./g')
+          CHANGELOG=$(awk "/^## \[${VERSION_RE}\]/{found=1; next} /^## \[/{if(found) exit} found{print}" CHANGELOG.md)
           
           if [ -z "$CHANGELOG" ]; then
             CHANGELOG="Release v${VERSION}"

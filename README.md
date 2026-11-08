@@ -49,7 +49,6 @@ services:
     environment:
       - DEEMIX_ARL=your_deezer_arl_token_here
     volumes:
-      - ./config:/app/config
       - ./logs:/app/logs
 ```
 
@@ -76,11 +75,16 @@ services:
 |----------|---------|-------------|
 | `DEEMIX_ARL` | - | **Required** for Deezer integration. Your Deezer ARL token |
 | `MITM_PORT` | `8080` | External proxy port. **Note:** if you change this, you must also adjust the container port mapping (e.g. `"9090:9090"`) |
+| `PROXY_PORT` | `7171` | Internal Node.js API port (mitmproxy forwards to it) |
+| `DEEMIX_PORT` | `7272` | Internal Deezer API server port |
+| `HOST` | `127.0.0.1` | Listen address of the Node.js API server; must be loopback or `0.0.0.0` (startup probe and HEALTHCHECK use 127.0.0.1) |
+| `DEEMIX_HOST` | `127.0.0.1` | Listen address of the Deezer API server; must be loopback or `0.0.0.0` (startup probe uses 127.0.0.1) |
+| `PROXY_HOST` | `127.0.0.1` | Address mitmproxy forwards intercepted requests to |
 | `PRIO_DEEMIX` | `false` | Prioritize Deezer albums over MusicBrainz |
 | `OVERRIDE_MB` | `false` | Use Deezer data only (ignores MusicBrainz; real MB artist IDs deliberately return 404) |
 | `PREFER_SPECIAL_EDITIONS` | `false` | Prefer Deluxe/Extended editions over standard albums |
 | `DEEMIX_MAX_ALBUMS` | `500` | Cap for Deezer album search results per artist refresh |
-| `DEEMIX_URL` | `http://127.0.0.1:7272` | Deemix server URL (only change for external Deemix instances) |
+| `DEEMIX_URL` | `http://127.0.0.1:$DEEMIX_PORT` | Deemix server URL (only change for external Deemix instances) |
 | `LIDARR_URL` | - | Your Lidarr instance URL (improves artist matching for Deezer albums) |
 | `LIDARR_API_KEY` | - | Your Lidarr API key (used together with `LIDARR_URL`) |
 | `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
@@ -192,7 +196,6 @@ See [CHANGELOG.md](./CHANGELOG.md) for version history.
 ## 🙏 Credits
 
 - Original project by [ad-on-is](https://github.com/ad-on-is/lidarr-deemix)
-- [Deemix](https://deemix.app/) for Deezer integration
 - [Lidarr](https://lidarr.audio/) for being awesome
 
 ---

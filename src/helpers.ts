@@ -8,27 +8,21 @@ import latinize from "latinize";
  * - everything non-alphanumeric (except spaces) removed
  * - whitespace collapsed
  */
-export function normalize(str: string): string {
-  return latinize(str.toLowerCase())
-    .replace(/[^a-z0-9\s]/g, "")
+export function normalize(str?: string): string {
+  if (!str) return "";
+  const result = latinize(str.toLowerCase())
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
+  // symbol-only names ("!!!", "+/-") must not all collapse to ""
+  return result || str.trim().toLowerCase();
 }
 
 /**
  * Recursively removes the given keys from an object.
  */
 export function removeKeys(obj: any, keys: string[]): any {
-  for (const prop in obj) {
-    if (Object.prototype.hasOwnProperty.call(obj, prop)) {
-      if (keys.indexOf(prop) > -1) {
-        delete obj[prop];
-      } else if (typeof obj[prop] === "object" && obj[prop] !== null) {
-        removeKeys(obj[prop], keys);
-      }
-    }
-  }
-  return obj;
+  return JSON.parse(JSON.stringify(obj), (k, v) => (keys.includes(k) ? undefined : v));
 }
 
 /**
@@ -80,7 +74,10 @@ const EDITION_SUFFIXES = [
  * get merged into the main album.
  */
 const EDITION_KEYWORDS_RE =
-  /remaster|deluxe|edition|version|explicit|expanded|extended|bonus|anniversary|collector|clean|premium/i;
+  /\b(remaster(ed)?|deluxe|edition|version|explicit|expanded|extended|bonus|anniversary|collector'?s?|clean|premium)\b/i;
+const LIVE_RE = /\blive\b/i;
+// different recordings, not editions: "(Acoustic Version)" must not merge with the album
+const DISTINCT_VERSION_RE = /\b(acoustic|instrumental|mono|demo|radio|karaoke|remix|edit)\b/i;
 
 /**
  * Extracts the base title of an album, without edition suffixes.
@@ -98,35 +95,49 @@ export function extractBaseTitle(title: string): string {
   // 1. strip bracket content ONLY when it contains edition keywords:
   //    (Deluxe Edition), [Remastered], ... - but not (Live), (Vol. 2)
   base = base.replace(/\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]\s*/g, (match, inner) =>
-    EDITION_KEYWORDS_RE.test(inner) ? " " : match
+    EDITION_KEYWORDS_RE.test(inner) && !LIVE_RE.test(inner) && !DISTINCT_VERSION_RE.test(inner)
+      ? " "
+      : match
   );
 
-  // 2. strip edition suffixes at the end (with optional separator)
-  for (const suffix of EDITION_SUFFIXES) {
-    // matches " - deluxe", " – deluxe", " deluxe" at the end
-    const regex = new RegExp(`\\s*[-–—:]?\\s*${escapeRegex(suffix)}\\s*$`, "i");
-    base = base.replace(regex, "");
-  }
+  // 2. strip edition suffixes at the end (with optional separator),
+  //    repeated so stacked suffixes like "remastered deluxe" all go
+  let prev: string;
+  do {
+    prev = base;
+    for (const suffix of EDITION_SUFFIXES) {
+      // matches " - deluxe", " deluxe" (also en/em dash) at the end, but not "unclean"
+      const regex = new RegExp(`(?:^|[\\s\\-\\u2013\\u2014:])\\s*[-\\u2013\\u2014:]?\\s*${escapeRegex(suffix)}\\s*$`, "i");
+      base = base.replace(regex, "");
+    }
+  } while (base !== prev);
 
   // 3. normalize: drop accents, collapse whitespace
   base = latinize(base)
-    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-  return base;
+  // a title that is nothing but a suffix ("Deluxe") is still its own album
+  return base || title.toLowerCase().trim();
 }
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// clean/explicit are content ratings, not editions - a censored "Clean Version"
+// must never get the special-edition bonus over the explicit release
+const SPECIAL_EDITION_RE = new RegExp(
+  `\\b(${EDITION_SUFFIXES.filter((s) => !/clean|explicit/.test(s)).map(escapeRegex).join("|")})\\b`,
+  "i"
+);
+
 /**
  * True if the album title looks like a special edition (Deluxe, Extended, ...)
  */
 export function isSpecialEdition(title: string): boolean {
-  const lowerTitle = title.toLowerCase();
-  return EDITION_SUFFIXES.some((suffix) => lowerTitle.includes(suffix));
+  return SPECIAL_EDITION_RE.test(title);
 }
 
 /**
@@ -162,7 +173,7 @@ export function calculateAlbumScore(album: any, preferSpecialEditions: boolean):
 
 /**
  * Deduplicates albums:
- * 1. group albums by normalized base title
+ * 1. group albums by record type and normalized base title
  * 2. within each group, keep the album with the highest score
  * 3. ties are broken by track count
  *
@@ -179,18 +190,18 @@ export function deduplicateAlbums(albums: any[]): any[] {
     const title = album["title"] || "";
     if (!title) continue;
 
-    const baseTitle = extractBaseTitle(title);
-    if (!baseTitle) continue;
+    // a single and an album sharing a name are different releases
+    const key = `${album.record_type ?? ""}|${extractBaseTitle(title)}`;
 
-    if (!albumGroups.has(baseTitle)) {
-      albumGroups.set(baseTitle, []);
+    if (!albumGroups.has(key)) {
+      albumGroups.set(key, []);
     }
-    albumGroups.get(baseTitle)!.push(album);
+    albumGroups.get(key)!.push(album);
   }
 
   const result: any[] = [];
 
-  for (const [baseTitle, group] of albumGroups) {
+  for (const group of albumGroups.values()) {
     if (group.length === 1) {
       result.push(group[0]);
       continue;
@@ -207,16 +218,7 @@ export function deduplicateAlbums(albums: any[]): any[] {
         return b.tracks - a.tracks;
       });
 
-    const best = scored[0];
-    const alternatives = scored.slice(1).map((s) => s.album["title"]).join(", ");
-
-    console.log(
-      `[dedupe] "${baseTitle}": picked "${best.album["title"]}" ` +
-      `(score: ${best.score}, tracks: ${best.tracks}) | ` +
-      `dropped: ${alternatives}`
-    );
-
-    result.push(best.album);
+    result.push(scored[0].album);
   }
 
   return result;

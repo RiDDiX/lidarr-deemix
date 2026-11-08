@@ -13,6 +13,7 @@ echo ""
 export MITM_PORT=${MITM_PORT:-8080}
 export PROXY_PORT=${PROXY_PORT:-7171}
 export DEEMIX_PORT=${DEEMIX_PORT:-7272}
+export DEEMIX_URL=${DEEMIX_URL:-http://127.0.0.1:$DEEMIX_PORT}
 DEEMIX_ARL=${DEEMIX_ARL:-}
 # Extra mitmdump arguments, e.g. '--proxyauth user:pass'
 MITM_EXTRA_ARGS=${MITM_EXTRA_ARGS:-}
@@ -49,6 +50,20 @@ start_mitm() {
     MITM_PID=$!
 }
 
+# Graceful shutdown
+cleanup() {
+    echo ""
+    echo "Shutting down services..."
+    [ -n "$DEEMIX_PID" ] && kill "$DEEMIX_PID" 2>/dev/null
+    [ -n "$NODE_PID" ] && kill "$NODE_PID" 2>/dev/null
+    [ -n "$MITM_PID" ] && kill "$MITM_PID" 2>/dev/null
+    wait $DEEMIX_PID $NODE_PID $MITM_PID 2>/dev/null
+    echo "All services stopped."
+    exit "${1:-0}"
+}
+
+trap cleanup SIGTERM SIGINT
+
 # --- Deemix (only with an ARL) ---
 if [ -z "$DEEMIX_ARL" ]; then
     echo "⚠️  WARNING: DEEMIX_ARL is not set!"
@@ -75,21 +90,31 @@ else
     if [ "$DEEMIX_UP" = true ]; then
         echo "  ✓ Deemix server is up"
     else
-        echo "  ⚠️  Deemix server not ready (ARL invalid or expired?)"
-        echo "     The monitor keeps trying to restart it (see logs/deemix.log)."
+        echo "  ⚠️  Deemix server not ready (see logs/deemix.log)"
+        echo "     The monitor restarts it if the process exits."
     fi
 fi
 
 # --- Node API server ---
 echo "→ Starting NodeJS API server on port $PROXY_PORT..."
 start_node
-sleep 2
 
-if curl -sf "http://127.0.0.1:$PROXY_PORT/health" > /dev/null 2>&1; then
+NODE_UP=false
+for _ in $(seq 1 10); do
+    if ! kill -0 "$NODE_PID" 2>/dev/null; then
+        break
+    fi
+    if curl -sf "http://127.0.0.1:$PROXY_PORT/health" > /dev/null 2>&1; then
+        NODE_UP=true
+        break
+    fi
+    sleep 1
+done
+if [ "$NODE_UP" = true ]; then
     echo "  ✓ NodeJS API server is up"
 else
     echo "  ✗ NodeJS API server failed to start!"
-    exit 1
+    cleanup 1
 fi
 
 # --- mitmproxy ---
@@ -101,7 +126,7 @@ if kill -0 "$MITM_PID" 2>/dev/null; then
     echo "  ✓ mitmproxy is up"
 else
     echo "  ✗ mitmproxy failed to start!"
-    exit 1
+    cleanup 1
 fi
 
 echo ""
@@ -124,20 +149,6 @@ echo "║  → Port: $MITM_PORT                                 "
 echo "║  → Certificate Validation: Disabled               ║"
 echo "╚════════════════════════════════════════════════════╝"
 echo ""
-
-# Graceful shutdown
-cleanup() {
-    echo ""
-    echo "Shutting down services..."
-    [ -n "$DEEMIX_PID" ] && kill "$DEEMIX_PID" 2>/dev/null
-    [ -n "$NODE_PID" ] && kill "$NODE_PID" 2>/dev/null
-    [ -n "$MITM_PID" ] && kill "$MITM_PID" 2>/dev/null
-    wait $DEEMIX_PID $NODE_PID $MITM_PID 2>/dev/null
-    echo "All services stopped."
-    exit 0
-}
-
-trap cleanup SIGTERM SIGINT
 
 # Watch the processes
 while true; do

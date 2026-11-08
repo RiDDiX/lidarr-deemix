@@ -71,13 +71,12 @@ COPY run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 
 # Create directories
-RUN mkdir -p /app/logs /app/config
+RUN mkdir -p /app/logs
 
 # Environment defaults
 ENV MITM_PORT=8080 \
     PROXY_PORT=7171 \
     DEEMIX_PORT=7272 \
-    DEEMIX_URL=http://127.0.0.1:7272 \
     LOG_LEVEL=info \
     NODE_ENV=production
 

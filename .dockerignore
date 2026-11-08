@@ -60,6 +60,6 @@ downloads/
 
 # Tests
 test/
-tests/
-*.test.*
+python/tests/
+src/*.test.ts
 *.spec.*

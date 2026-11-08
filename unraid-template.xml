@@ -12,7 +12,7 @@
   <Overview>Enriches Lidarr with Deezer metadata. Configure Lidarr to use this container as HTTP(S) proxy (Settings - General). WARNING: the proxy port is an anonymous forward proxy - do not expose it to the internet.</Overview>
   <Category/>
   <WebUI/>
-  <TemplateURL>https://github.com/RiDDiX/lidarr-deemix/blob/main/unraid-template.xml</TemplateURL>
+  <TemplateURL>https://raw.githubusercontent.com/RiDDiX/lidarr-deemix/main/unraid-template.xml</TemplateURL>
   <Icon/>
   <ExtraParams/>
   <PostArgs/>

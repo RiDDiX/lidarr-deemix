@@ -52,9 +52,18 @@ export async function proxyToScrobbler(req: FastifyRequest, reply: FastifyReply)
     method: req.method,
     headers,
     body,
+    signal: AbortSignal.timeout(30000),
   };
 
-  const res = await fetch(url, fetchOpts);
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(url, fetchOpts);
+    text = await res.text();
+  } catch (error) {
+    req.log.error({ err: error }, "Scrobbler upstream request failed");
+    return reply.status(502).send({ error: "Upstream unavailable" });
+  }
 
   const responseHeaders: Record<string, string> = {};
   res.headers.forEach((value, key) => {
@@ -67,14 +76,23 @@ export async function proxyToScrobbler(req: FastifyRequest, reply: FastifyReply)
   const isJson = contentType.includes("application/json");
 
   if (isJson) {
-    let json: any = await res.json();
+    // 204 and some error replies carry a JSON content-type with an empty body
+    if (!text) {
+      return reply.status(res.status).headers(responseHeaders).send();
+    }
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // HTML error pages sometimes arrive labelled as JSON - pass them through
+      return reply.status(res.status).headers(responseHeaders).send(text);
+    }
     if (process.env.OVERRIDE_MB === "true") {
       json = removeKeys(json, ["mbid"]);
     }
     reply.status(res.status).headers(responseHeaders).send(json);
   } else {
     // Non-JSON responses (e.g. XML) are passed through as-is
-    const data = await res.text();
-    reply.status(res.status).headers(responseHeaders).send(data);
+    reply.status(res.status).headers(responseHeaders).send(text);
   }
 }

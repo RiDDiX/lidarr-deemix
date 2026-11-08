@@ -10,12 +10,15 @@ import {
 import { proxyToScrobbler } from './scrobbler.js';
 
 const LIDARR_API_URL = 'https://api.lidarr.audio';
-const API_VERSION = 'v0.4';
 const FETCH_TIMEOUT = 30000;
 
 const fastify = Fastify({
   logger: {
     level: process.env.LOG_LEVEL || 'info',
+    // query strings carry Last.fm api_key/sk/api_sig - never log them
+    serializers: {
+      req: (r) => ({ method: r.method, url: r.url.split('?')[0] }),
+    },
     transport: {
       target: 'pino-pretty',
       options: {
@@ -63,6 +66,8 @@ async function fetchFromLidarr(path: string): Promise<any> {
   }
 }
 
+const VERSION_RE = /^v\d+(\.\d+)?$/;
+
 // Health check endpoint
 fastify.get('/health', async () => {
   return { status: 'ok', timestamp: new Date().toISOString() };
@@ -75,54 +80,57 @@ fastify.get('/health', async () => {
 //   type=album  -> automatic album lookup, expects bare AlbumResource[] with artists+releases
 fastify.get('/api/:version/search', async (request, reply) => {
   const { version } = request.params as { version: string };
+  if (!VERSION_RE.test(version)) {
+    reply.code(404);
+    return { error: 'Not found' };
+  }
   const { type, query, term } = request.query as { type?: string; query?: string; term?: string };
   const searchTerm = query || term || '';
   const searchType = type || 'all';
 
   fastify.log.info(`Search request: term="${searchTerm}" type="${searchType}"`);
 
+  // Fetch from Lidarr API, forwarding the original query string untouched so
+  // parameters like artist=... and includeTracks=1 are preserved
+  let lidarrData: any[] = [];
   try {
-    // Fetch from Lidarr API, forwarding the original query string untouched so
-    // parameters like artist=... and includeTracks=1 are preserved
-    let lidarrData: any[] = [];
-    try {
-      const queryIndex = request.url.indexOf('?');
-      const queryString = queryIndex >= 0 ? request.url.slice(queryIndex) : '';
-      const data = await fetchFromLidarr(`/api/${version}/search${queryString}`);
-      if (Array.isArray(data)) {
-        lidarrData = data;
-      }
-    } catch (error) {
-      fastify.log.warn({ err: error }, 'Failed to fetch from Lidarr API, using Deemix only');
+    const queryIndex = request.url.indexOf('?');
+    const queryString = queryIndex >= 0 ? request.url.slice(queryIndex) : '';
+    const data = await fetchFromLidarr(`/api/${encodeURIComponent(version)}/search${queryString}`);
+    if (Array.isArray(data)) {
+      lidarrData = data;
     }
-
-    // Album searches must stay bare AlbumResource[]; injecting artist objects
-    // makes Lidarr's MapSearchResult throw and aborts the whole search
-    if (searchType === 'album') {
-      return lidarrData;
-    }
-
-    // Enhance with Deemix results (if Deemix is available)
-    let enhancedResults: any[];
-    try {
-      enhancedResults = await search(lidarrData, searchTerm, searchType === 'all');
-    } catch (searchError) {
-      fastify.log.warn({ err: searchError }, 'Deemix enhancement failed, returning Lidarr data only');
-      enhancedResults = lidarrData;
-    }
-
-    fastify.log.info(`Search results: ${lidarrData.length} from Lidarr, ${enhancedResults.length} total after enhancement`);
-
-    return enhancedResults;
   } catch (error) {
-    fastify.log.error({ err: error }, 'Search failed completely');
-    return [];
+    fastify.log.warn({ err: error }, 'Failed to fetch from Lidarr API, using Deemix only');
   }
+
+  // Album searches must stay bare AlbumResource[]; injecting artist objects
+  // makes Lidarr's MapSearchResult throw and aborts the whole search
+  if (searchType === 'album') {
+    return lidarrData;
+  }
+
+  // Enhance with Deemix results (if Deemix is available)
+  let enhancedResults: any[];
+  try {
+    enhancedResults = await search(lidarrData, searchTerm, searchType === 'all');
+  } catch (searchError) {
+    fastify.log.warn({ err: searchError }, 'Deemix enhancement failed, returning Lidarr data only');
+    enhancedResults = lidarrData;
+  }
+
+  fastify.log.info(`Search results: ${lidarrData.length} from Lidarr, ${enhancedResults.length} total after enhancement`);
+
+  return enhancedResults;
 });
 
 // Artist endpoint - /api/v0.4/artist/{id}
 fastify.get('/api/:version/artist/:artistId', async (request, reply) => {
   const { version, artistId } = request.params as { version: string; artistId: string };
+  if (!VERSION_RE.test(version)) {
+    reply.code(404);
+    return { error: 'Not found' };
+  }
   
   fastify.log.info(`Artist request: ${artistId}`);
   
@@ -156,7 +164,7 @@ fastify.get('/api/:version/artist/:artistId', async (request, reply) => {
 
   // Fetch from Lidarr and enhance with Deemix
   try {
-    let artistData = await fetchFromLidarr(`/api/${version}/artist/${artistId}`);
+    let artistData = await fetchFromLidarr(`/api/${encodeURIComponent(version)}/artist/${encodeURIComponent(artistId)}`);
     
     if (!artistData) {
       reply.code(404);
@@ -180,6 +188,10 @@ fastify.get('/api/:version/artist/:artistId', async (request, reply) => {
 // Album endpoint - /api/v0.4/album/{id}
 fastify.get('/api/:version/album/:albumId', async (request, reply) => {
   const { version, albumId } = request.params as { version: string; albumId: string };
+  if (!VERSION_RE.test(version)) {
+    reply.code(404);
+    return { error: 'Not found' };
+  }
   
   fastify.log.info(`Album request: ${albumId}`);
   
@@ -206,7 +218,7 @@ fastify.get('/api/:version/album/:albumId', async (request, reply) => {
   
   // Fetch from Lidarr
   try {
-    const albumData = await fetchFromLidarr(`/api/${version}/album/${albumId}`);
+    const albumData = await fetchFromLidarr(`/api/${encodeURIComponent(version)}/album/${encodeURIComponent(albumId)}`);
     
     if (!albumData) {
       reply.code(404);
@@ -223,18 +235,18 @@ fastify.get('/api/:version/album/:albumId', async (request, reply) => {
 
 // Audioscrobbler proxy - handles ws.audioscrobbler.com requests redirected by mitmproxy
 fastify.all('/2.0/*', async (request, reply) => {
-  fastify.log.debug(`Scrobbler request: ${request.method} ${request.url}`);
+  fastify.log.debug(`Scrobbler request: ${request.method} ${request.url.split('?')[0]}`);
   return proxyToScrobbler(request, reply);
 });
 fastify.all('/2.0', async (request, reply) => {
-  fastify.log.debug(`Scrobbler request: ${request.method} ${request.url}`);
+  fastify.log.debug(`Scrobbler request: ${request.method} ${request.url.split('?')[0]}`);
   return proxyToScrobbler(request, reply);
 });
 
 // Catch-all proxy for other api.lidarr.audio endpoints
 fastify.all('/api/*', async (request, reply) => {
   const path = request.url;
-  fastify.log.info(`Proxying: ${request.method} ${path}`);
+  fastify.log.info(`Proxying: ${request.method} ${path.split('?')[0]}`);
   
   try {
     // Build headers - forward relevant original headers
@@ -255,6 +267,7 @@ fastify.all('/api/*', async (request, reply) => {
     const fetchOpts: RequestInit = {
       method: request.method,
       headers,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT),
     };
 
     if (request.method !== 'GET' && request.method !== 'HEAD' && request.body) {
@@ -269,13 +282,14 @@ fastify.all('/api/*', async (request, reply) => {
     
     reply.code(response.status);
     
-    const contentType = response.headers.get('content-type');
-    if (contentType) {
-      reply.header('Content-Type', contentType);
+    for (const name of ['content-type', 'cache-control', 'etag']) {
+      const value = response.headers.get(name);
+      if (value) {
+        reply.header(name, value);
+      }
     }
     
-    const data = await response.text();
-    return reply.send(data);
+    return reply.send(Buffer.from(await response.arrayBuffer()));
   } catch (error) {
     fastify.log.error({ err: error }, 'Proxy request failed');
     reply.code(502);
@@ -285,17 +299,22 @@ fastify.all('/api/*', async (request, reply) => {
 
 // Error handler - preserve the original status code (415, 400, ...) so
 // client errors are not masked as generic 500s
-fastify.setErrorHandler(async (error, request, reply) => {
+fastify.setErrorHandler(async (error, _request, reply) => {
   fastify.log.error({ err: error }, 'Server error');
   const statusCode = error.statusCode && error.statusCode >= 400 ? error.statusCode : 500;
-  reply.code(statusCode).send({ error: 'Request failed', message: error.message });
+  reply.code(statusCode).send(
+    statusCode < 500
+      ? { error: 'Request failed', message: error.message }
+      : { error: 'Request failed' }
+  );
 });
 
 // Start server
 const start = async () => {
   try {
     const port = parseInt(process.env.PROXY_PORT || '7171');
-    const host = process.env.HOST || '0.0.0.0';
+    // mitmproxy and the healthcheck reach the proxy inside the container
+    const host = process.env.HOST || '127.0.0.1';
     
     await fastify.listen({ port, host });
     fastify.log.info(`🚀 Lidarr-Deemix proxy server started on ${host}:${port}`);
@@ -326,9 +345,9 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  fastify.log.fatal({ promise, reason }, 'Unhandled rejection');
-  process.exit(1);
+// a stray rejected promise should not take down the proxy
+process.on('unhandledRejection', (reason) => {
+  fastify.log.error({ reason }, 'Unhandled rejection');
 });
 
 start();
