@@ -57,7 +57,7 @@ async function fetchFromLidarr(path: string): Promise<any> {
       if (response.status === 404) {
         return null;
       }
-      throw new Error(`Lidarr API error: ${response.status}`);
+      throw Object.assign(new Error(`Lidarr API error: ${response.status}`), { statusCode: response.status });
     }
     
     return await response.json();
@@ -67,6 +67,12 @@ async function fetchFromLidarr(path: string): Promise<any> {
 }
 
 const VERSION_RE = /^v\d+(\.\d+)?$/;
+
+// pass Lidarr client errors through; anything else is an upstream failure, not ours
+function upstreamStatus(error: any): number {
+  const status = error?.statusCode;
+  return status >= 400 && status < 500 ? status : 502;
+}
 
 // Health check endpoint
 fastify.get('/health', async () => {
@@ -180,8 +186,8 @@ fastify.get('/api/:version/artist/:artistId', async (request, reply) => {
     return artistData;
   } catch (error) {
     fastify.log.error({ err: error }, 'Artist fetch failed');
-    reply.code(500);
-    return { error: 'Internal server error' };
+    reply.code(upstreamStatus(error));
+    return { error: 'Upstream request failed' };
   }
 });
 
@@ -228,8 +234,8 @@ fastify.get('/api/:version/album/:albumId', async (request, reply) => {
     return albumData;
   } catch (error) {
     fastify.log.error({ err: error }, 'Album fetch failed');
-    reply.code(500);
-    return { error: 'Internal server error' };
+    reply.code(upstreamStatus(error));
+    return { error: 'Upstream request failed' };
   }
 });
 
